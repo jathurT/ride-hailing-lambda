@@ -1,0 +1,338 @@
+# Ride-Hailing Fleet Operations - Lambda architecture pipeline.
+#
+# Organised into PROFILES because the host has 15.6 GB of RAM and Docker
+# realistically gets ~11 GB (see plan/10 section 0.2). Services with no `profiles`
+# key always start; the rest are opt-in:
+#
+#   make up-core   (no profile)  ~5.6 G   pipeline only
+#   make up        COMPOSE_PROFILES=run   ~8.2 G   + Kafka UI + Airflow   <- DEFAULT
+#   make up-obs    COMPOSE_PROFILES=obs   ~9.9 G   + Prometheus/Grafana/Alertmanager
+#   make up-full   COMPOSE_PROFILES=full  ~12.4 G  + Jaeger/OTel + Spark cluster
+#
+# Profiles do not nest in Compose, so a service that should appear from `run`
+# upwards lists every profile at or above it.
+
+name: fleet
+
+x-logging: &default-logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+services:
+
+  # --- ingestion backbone -------------------------------------------------
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: fleet-kafka
+    hostname: kafka
+    ports:
+      - "9092:9092"          # host access (localhost:9092)
+    environment:
+      # KRaft: no ZooKeeper. The lecture notes ZooKeeper was used "before version
+      # 2.8"; we run 3.x, so the ensemble in the lecture diagram is absent by
+      # design, not by oversight. Declared in the report - see plan/02 section 2.
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_LISTENERS: PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # A typo in a topic name must fail loudly, not silently create a topic with
+      # default settings - which for a compacted topic would be the wrong policy.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      # Without this the JVM sizes its heap from HOST ram and over-commits.
+      KAFKA_HEAP_OPTS: "-Xmx768m -Xms512m"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    mem_limit: 1500m
+    logging: *default-logging
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.1
+    container_name: fleet-schema-registry
+    hostname: schema-registry
+    depends_on:
+      kafka: { condition: service_healthy }
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:29092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      # BACKWARD: new consumers can read old data. Correct here because the
+      # streaming job is redeployed far more often than the producers, and it is
+      # what lets us add a nullable field without breaking anything.
+      SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL: backward
+      SCHEMA_REGISTRY_HEAP_OPTS: "-Xmx384m"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8081/subjects >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    mem_limit: 512m
+    logging: *default-logging
+
+  # --- storage layers -----------------------------------------------------
+
+  minio:
+    image: minio/minio:RELEASE.2024-06-13T22-53-53Z
+    container_name: fleet-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"      # console: browse the master dataset and the reports
+    environment:
+      MINIO_ROOT_USER: ${STORE_MINIO_ACCESS_KEY:-fleetadmin}
+      MINIO_ROOT_PASSWORD: ${STORE_MINIO_SECRET_KEY:-fleetadmin}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    mem_limit: 512m
+    logging: *default-logging
+
+  postgres-mart:
+    image: postgres:16-alpine
+    container_name: fleet-postgres-mart
+    ports:
+      # 5442, not 5432: this machine already runs a native PostgreSQL on the
+      # default port. Docker silently failed to publish rather than erroring, so
+      # host tools connected to the wrong database. Non-default host ports keep
+      # the project isolated from whatever else the machine happens to run.
+      - "5442:5432"
+    environment:
+      POSTGRES_USER: fleet
+      POSTGRES_PASSWORD: fleet
+      POSTGRES_DB: fleet_mart
+    volumes:
+      - postgres-mart-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fleet -d fleet_mart"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    mem_limit: 512m
+    logging: *default-logging
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: fleet-redis
+    # Persistence OFF, deliberately: the speed view is disposable by design, and
+    # disabling it removes fork-based snapshot pauses. See ADR-004.
+    command: ["redis-server", "--appendonly", "no", "--save", "", "--maxmemory", "192mb",
+              "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6389:6379"      # 6389, not 6379: native Redis already owns the default
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    mem_limit: 256m
+    logging: *default-logging
+
+  # --- one-shot bootstrap -------------------------------------------------
+
+  init:
+    build:
+      context: .
+      dockerfile: docker/init/Dockerfile
+    container_name: fleet-init
+    depends_on:
+      kafka: { condition: service_healthy }
+      schema-registry: { condition: service_healthy }
+      minio: { condition: service_healthy }
+      postgres-mart: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    env_file: [.env]
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      KAFKA_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      STORE_MINIO_ENDPOINT: http://minio:9000
+      STORE_POSTGRES_DSN: postgresql://fleet:fleet@postgres-mart:5432/fleet_mart
+      STORE_REDIS_URL: redis://redis:6379/0
+      SIM_STATE_PATH: /state/sim_epoch.json
+    volumes:
+      - ./state:/state
+      - ./sql:/app/sql:ro
+    restart: "no"
+    mem_limit: 256m
+    logging: *default-logging
+
+  # --- operator UIs (profile: run and above) ------------------------------
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    container_name: fleet-kafka-ui
+    profiles: ["run", "obs", "full"]
+    depends_on:
+      kafka: { condition: service_healthy }
+      schema-registry: { condition: service_healthy }
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: fleet
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      # Wired to the registry so Avro payloads are readable in the browser - the
+      # mitigation for Avro's "you can't cat a message" downside (plan/02 section 10).
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+      DYNAMIC_CONFIG_ENABLED: "true"
+      JAVA_OPTS: "-Xmx256m"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    mem_limit: 384m
+    logging: *default-logging
+
+  # --- simulated sources --------------------------------------------------
+
+  registry-producer:
+    build: { context: ., dockerfile: docker/producer/Dockerfile }
+    container_name: fleet-registry-producer
+    command: ["python", "-m", "fleet.ingestion.registry_producer"]
+    depends_on:
+      init: { condition: service_completed_successfully }
+    env_file: [.env]
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      KAFKA_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      SIM_STATE_PATH: /state/sim_epoch.json
+    volumes:
+      - ./state:/state
+    restart: "no"
+    mem_limit: 256m
+    logging: *default-logging
+
+  telemetry-producer:
+    build: { context: ., dockerfile: docker/producer/Dockerfile }
+    container_name: fleet-telemetry-producer
+    depends_on:
+      init: { condition: service_completed_successfully }
+      registry-producer: { condition: service_completed_successfully }
+    ports:
+      - "8001:8001"
+    env_file: [.env]
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      KAFKA_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      SIM_STATE_PATH: /state/sim_epoch.json
+      OBS_METRICS_PORT: 8001
+    volumes:
+      - ./state:/state
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8001/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    mem_limit: 256m
+    logging: *default-logging
+
+  expense-dropper:
+    build: { context: ., dockerfile: docker/producer/Dockerfile }
+    container_name: fleet-expense-dropper
+    command: ["python", "-m", "fleet.ingestion.expense_dropper",
+              "--bucket", "fleet-lake"]
+    depends_on:
+      init: { condition: service_completed_successfully }
+    ports:
+      - "8002:8002"
+    env_file: [.env]
+    environment:
+      SIM_STATE_PATH: /state/sim_epoch.json
+      OBS_METRICS_PORT: 8002
+      STORE_MINIO_ENDPOINT: http://minio:9000
+    volumes:
+      - ./state:/state
+      - ./landing:/landing
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8002/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    mem_limit: 256m
+    logging: *default-logging
+
+  # --- spark application --------------------------------------------------
+
+  # The serving layer (plan/07). Core profile - it is not an extra, it is where the
+  # Lambda merge actually happens, and the demo is driven through it.
+  api:
+    build: { context: ., dockerfile: docker/api/Dockerfile }
+    container_name: fleet-api
+    depends_on:
+      postgres-mart: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    ports:
+      - "8000:8000"
+    env_file: [.env]
+    environment:
+      STORE_POSTGRES_DSN: postgresql://fleet:fleet@postgres-mart:5432/fleet_mart
+      STORE_REDIS_URL: redis://redis:6379/0
+      SIM_STATE_PATH: /state/sim_epoch.json
+      OBS_SERVICE_NAME: serving-api
+    volumes:
+      - ./state:/state:ro
+    healthcheck:
+      # /health/live, never /health/ready: a readiness probe here would restart the
+      # API whenever Postgres blipped, which is the exact opposite of degrading
+      # gracefully.
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/live"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    mem_limit: 256m
+    logging: *default-logging
+
+  spark-app:
+    build: { context: ., dockerfile: docker/spark-app/Dockerfile }
+    container_name: fleet-spark-app
+    depends_on:
+      init: { condition: service_completed_successfully }
+    ports:
+      - "4040:4040"      # Structured Streaming UI
+    env_file: [.env]
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      KAFKA_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      STORE_MINIO_ENDPOINT: http://minio:9000
+      STORE_POSTGRES_DSN: postgresql://fleet:fleet@postgres-mart:5432/fleet_mart
+      STORE_REDIS_URL: redis://redis:6379/0
+      SIM_STATE_PATH: /state/sim_epoch.json
+    volumes:
+      - ./state:/state
+      - ./scripts:/app/scripts:ro
+    mem_limit: 1600m
+    logging: *default-logging
+
+volumes:
+  kafka-data:
+  minio-data:
+  postgres-mart-data:

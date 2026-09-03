@@ -1,0 +1,101 @@
+[project]
+name = "fleet"
+version = "0.1.0"
+description = "Ride-Hailing Fleet Operations — a Lambda architecture data pipeline (EC8203 mini project)"
+requires-python = ">=3.11"
+
+dependencies = [
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "structlog>=24.1",
+    "confluent-kafka[avro,schemaregistry]>=2.4",
+    "fastavro>=1.9",
+    "prometheus-client>=0.20",
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+# Installed only in the containers that need them, to keep images small.
+producer = ["redis>=5.0"]
+api      = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "redis>=5.0",
+    "psycopg[binary]>=3.1",
+    # Route-level request/latency metrics for free, so the SERVE column of the
+    # Grafana pipeline-health dashboard is real data rather than a placeholder.
+    "prometheus-fastapi-instrumentator>=7.0",
+]
+spark    = ["pyspark==3.5.1"]
+dev = [
+    "pytest>=8.2",
+    "pytest-cov>=5.0",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "freezegun>=1.5",
+    # The serving-layer contract tests drive the app through fastapi.testclient,
+    # which needs httpx. They run without Redis, Postgres or Docker.
+    "httpx>=0.27",
+    "fastapi>=0.111",
+    "redis>=5.0",
+    "psycopg[binary]>=3.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fleet"]
+
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "RUF"]
+ignore = [
+    "E501",   # line length is handled by the formatter
+    "B008",   # FastAPI's Depends() in defaults is idiomatic
+    "N812",   # `from pyspark.sql import functions as F` is the universal PySpark
+              # convention; renaming it would make this codebase harder to read for
+              # anyone who knows Spark, which is the opposite of the point.
+]
+
+[tool.ruff.lint.per-file-ignores]
+# N802: test names quote domain constants verbatim (…_is_WATCH, …_is_CRITICAL).
+# Lower-casing them would obscure which classification the test is about, which is
+# the one thing the name needs to convey.
+"tests/*" = ["S101", "N802"]
+
+# ---------------------------------------------------------------------------
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+
+# Strict only where the architecture argument lives. See plan/11 §4.
+[[tool.mypy.overrides]]
+module = ["fleet.transforms.*", "fleet.serving.merge", "fleet.common.simclock"]
+disallow_untyped_defs = true
+disallow_any_generics = true
+strict_equality = true
+
+# PySpark ships poor stubs; don't fight them.
+[[tool.mypy.overrides]]
+module = ["pyspark.*", "confluent_kafka.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "spark: needs a local SparkSession (slow)",
+    "integration: needs the docker stack running",
+]

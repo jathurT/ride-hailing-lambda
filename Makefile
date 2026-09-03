@@ -1,0 +1,206 @@
+# Ride-Hailing Fleet Operations - Lambda architecture pipeline
+#
+# Profiles exist because the host has 15.6 GB and Docker gets ~11 GB.
+# See plan/10 section 1.3.
+
+SHELL := /bin/bash
+.DEFAULT_GOAL := help
+COMPOSE := docker compose
+
+# ---------------------------------------------------------------------------
+##@ Setup
+
+.PHONY: setup
+setup: ## Check docker, create .env, pull images
+	@command -v docker >/dev/null || { echo "docker not found - enable Docker Desktop WSL integration (plan/10 §0.1)"; exit 1; }
+	@docker info >/dev/null 2>&1 || { echo "docker daemon unreachable - is Docker Desktop running?"; exit 1; }
+	@test -f .env || { cp .env.example .env; echo "created .env from .env.example"; }
+	@echo "OK. Next: make up"
+
+.PHONY: venv
+venv: ## Create the local dev environment (for tests/linting on the host)
+	uv venv --python 3.12 .venv
+	uv pip install --python .venv/bin/python -e ".[dev]"
+	@echo "OK. Activate with: source .venv/bin/activate"
+
+# ---------------------------------------------------------------------------
+##@ Running
+
+.PHONY: up-core
+up-core: ## ~5.6 G  pipeline only, Spark in local mode
+	COMPOSE_PROFILES= $(COMPOSE) up -d --build
+	@$(MAKE) --no-print-directory wait
+
+.PHONY: up
+up: ## ~8.2 G  + Kafka UI + Airflow            [DEFAULT]
+	COMPOSE_PROFILES=run $(COMPOSE) up -d --build
+	@$(MAKE) --no-print-directory wait
+
+.PHONY: up-obs
+up-obs: ## ~9.9 G  + Prometheus / Grafana / Alertmanager
+	COMPOSE_PROFILES=obs $(COMPOSE) up -d --build
+	@$(MAKE) --no-print-directory wait
+
+.PHONY: up-full
+up-full: ## ~12.4 G + Jaeger / OTel + Spark cluster (screenshots only - see plan/14 day 11)
+	COMPOSE_PROFILES=full $(COMPOSE) up -d --build
+	@$(MAKE) --no-print-directory wait
+
+.PHONY: wait
+wait: ## Block until every service reports healthy
+	@echo "waiting for services to become healthy..."
+	@for i in $$(seq 1 60); do \
+	  unhealthy=$$($(COMPOSE) ps --format '{{.Service}} {{.Health}}' 2>/dev/null | awk '$$2!="healthy" && $$2!="" {print $$1}'); \
+	  if [ -z "$$unhealthy" ]; then echo "all healthy"; break; fi; \
+	  sleep 3; \
+	done
+	@$(MAKE) --no-print-directory ps
+
+.PHONY: down
+down: ## Stop, KEEP data
+	$(COMPOSE) --profile "*" down
+
+.PHONY: clean
+clean: ## Stop and DELETE all data  <- the normal way to start a run (plan/10 §4.3)
+	$(COMPOSE) --profile "*" down -v
+	rm -f state/sim_epoch.json
+	@echo "wiped. next 'make up' starts a fresh simulation from day 1"
+
+.PHONY: restart-sim
+restart-sim: ## Re-anchor the simulated clock (after laptop sleep)
+	rm -f state/sim_epoch.json
+	$(COMPOSE) up -d --force-recreate init
+
+# ---------------------------------------------------------------------------
+##@ Inspecting
+
+.PHONY: ps
+ps: ## Status and health of every service
+	@$(COMPOSE) ps --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
+
+.PHONY: logs
+logs: ## Follow one service's JSON logs.  make logs SVC=init
+	$(COMPOSE) logs -f --tail=100 $(SVC)
+
+.PHONY: mem
+mem: ## Container memory against the budget (plan/10 §1.3)
+	@docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}' \
+	  | grep -E 'fleet-|NAME' || true
+	@echo ""
+	@docker stats --no-stream --format '{{.MemUsage}}' | grep -o '^[0-9.]*[GM]iB' | \
+	  awk '/GiB/{s+=$$1} /MiB/{s+=$$1/1024} END{printf "TOTAL: %.2f GiB (host gives docker ~11 GiB)\n", s}'
+
+.PHONY: ports
+ports: ## What is listening where
+	@echo "  Fleet API    http://localhost:8000/docs      <- the serving layer"
+	@echo "  Kafka UI     http://localhost:8080"
+	@echo "  Schema Reg   http://localhost:8081/subjects"
+	@echo "  Kafka        localhost:9092"
+	@echo "  MinIO console http://localhost:9001   (fleetadmin/fleetadmin)"
+	@echo "  Postgres      localhost:5442          (fleet/fleet, db fleet_mart)"
+	@echo "  Redis         localhost:6389"
+	@echo ""
+	@echo "  NOTE: 5442/6389 are deliberate - this machine runs native"
+	@echo "        PostgreSQL and Redis on the default 5432/6379."
+
+# ---------------------------------------------------------------------------
+##@ Batch layer
+
+.PHONY: backfill
+backfill: ## Run the batch layer over the last N complete sim days.  make backfill DAYS=7
+	@docker exec fleet-spark-app python /app/scripts/backfill.py --days $${DAYS:-7}
+
+.PHONY: batch-day
+batch-day: ## Recompute ONE sim date without moving the watermark.  make batch-day DATE=2026-03-04
+	@test -n "$(DATE)" || { echo "usage: make batch-day DATE=YYYY-MM-DD"; exit 2; }
+	@docker exec fleet-spark-app python /app/scripts/backfill.py --from $(DATE) --to $(DATE)
+
+.PHONY: batch-check
+batch-check: ## The numbers that prove the backfill did what it claims
+	@docker exec -e PGPASSWORD=fleet fleet-postgres-mart psql -U fleet -d fleet_mart -tA -c "\
+	  SELECT 'pnl rows          : ' || count(*) FROM mart.fact_vehicle_daily_pnl \
+	  UNION ALL SELECT 'distinct sim_dates: ' || count(DISTINCT sim_date) FROM mart.fact_vehicle_daily_pnl \
+	  UNION ALL SELECT 'restated rows     : ' || count(*) FROM mart.fact_vehicle_daily_pnl WHERE restatement_count > 0 \
+	  UNION ALL SELECT 'zone-hourly rows  : ' || count(*) FROM mart.fact_zone_hourly \
+	  UNION ALL SELECT 'watermark         : ' || batch_complete_thru FROM mart.batch_high_water_mark;"
+	@echo ""
+	@echo "classification by sim_date:"
+	@docker exec -e PGPASSWORD=fleet fleet-postgres-mart psql -U fleet -d fleet_mart -c "\
+	  SELECT sim_date, classification, count(*) FROM mart.fact_vehicle_daily_pnl \
+	  GROUP BY 1,2 ORDER BY 1,2;"
+	@echo "revenue vs zone earnings (two independent paths to one number - must match):"
+	@docker exec -e PGPASSWORD=fleet fleet-postgres-mart psql -U fleet -d fleet_mart -c "\
+	  SELECT p.sim_date, round(p.revenue,2) AS pnl_revenue, round(z.earnings,2) AS zone_earnings, \
+	         round(p.revenue - z.earnings, 2) AS delta \
+	    FROM (SELECT sim_date, sum(revenue) revenue FROM mart.fact_vehicle_daily_pnl GROUP BY 1) p \
+	    FULL JOIN (SELECT sim_date, sum(earnings) earnings FROM mart.fact_zone_hourly GROUP BY 1) z \
+	      USING (sim_date) ORDER BY 1;"
+
+# ---------------------------------------------------------------------------
+.PHONY: topics
+topics: ## List topics with partition counts and cleanup policy
+	@docker exec fleet-kafka kafka-topics --bootstrap-server localhost:9092 --list
+	@echo ""
+	@for t in $$(docker exec fleet-kafka kafka-topics --bootstrap-server localhost:9092 --list | grep -v '^__'); do \
+	  echo "--- $$t"; \
+	  docker exec fleet-kafka kafka-topics --bootstrap-server localhost:9092 --describe --topic $$t | head -1; \
+	done
+
+.PHONY: schemas
+schemas: ## List registered schema subjects
+	@curl -s http://localhost:8081/subjects | python3 -m json.tool
+
+.PHONY: simclock
+simclock: ## Show the current simulated time
+	@cat state/sim_epoch.json 2>/dev/null | python3 -m json.tool || echo "no anchor yet - run make up"
+
+# ---------------------------------------------------------------------------
+##@ Quality
+
+.PHONY: test
+test: ## Unit tests (no docker needed)
+	.venv/bin/pytest tests/unit -v
+
+.PHONY: lint
+lint: ## ruff + format check + mypy
+	.venv/bin/ruff check src tests scripts
+	.venv/bin/ruff format --check src tests scripts
+	.venv/bin/mypy src/fleet/common/simclock.py
+
+.PHONY: fmt
+fmt: ## Auto-format
+	.venv/bin/ruff format src tests scripts
+	.venv/bin/ruff check --fix src tests scripts
+
+# ---------------------------------------------------------------------------
+##@ Help
+
+.PHONY: help
+help:
+	@awk 'BEGIN {FS=":.*##"; printf "\nUsage: make <target>\n"} \
+	  /^[a-zA-Z_-]+:.*?##/ {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2} \
+	  /^##@/ {printf "\n\033[1m%s\033[0m\n", substr($$0,5)}' $(MAKEFILE_LIST)
+	@echo ""
+
+.PHONY: psql
+psql: ## psql into the mart
+	@docker exec -it fleet-postgres-mart psql -U fleet -d fleet_mart
+
+.PHONY: redis-cli
+redis-cli: ## redis-cli into the speed view
+	@docker exec -it fleet-redis redis-cli
+
+.PHONY: verify-s3a
+verify-s3a: ## Prove Spark can round-trip Parquet through MinIO
+	@docker compose run --rm --no-deps spark-app python /app/scripts/verify_s3a.py
+
+.PHONY: verify-kafka
+verify-kafka: ## Prove Spark can decode the producer's Confluent-framed Avro
+	@docker compose run --rm --no-deps spark-app python /app/scripts/verify_kafka_avro.py
+
+.PHONY: restart-svc
+restart-svc: ## Recreate one service without re-running init.  make restart-svc SVC=telemetry-producer
+	@test -n "$(SVC)" || { echo "usage: make restart-svc SVC=<service>"; exit 1; }
+	docker compose up -d --build --no-deps --force-recreate $(SVC)
+	@echo "NOTE: --no-deps is required. Without it compose re-runs the init container,"
+	@echo "      which refuses to start over an existing run (plan/10 §4.3)."
