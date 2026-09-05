@@ -1,0 +1,18 @@
+{
+  "type": "record",
+  "namespace": "fleet.registry",
+  "name": "VehicleRegistryRecord",
+  "doc": "Slowly-changing vehicle reference data. Published to a LOG-COMPACTED topic keyed by vehicle_id, so the topic materialises as a table of current values - the textbook compaction case. See plan/04 section 1.3.",
+  "fields": [
+    {"name": "vehicle_id", "type": "string"},
+    {"name": "model",      "type": "string"},
+    {"name": "fuel_type", "type":
+      {"type": "enum", "name": "FuelType", "symbols": ["petrol", "hybrid", "electric"]},
+     "doc": "Drives cost per km in the expense generator, so hybrids and EVs really do show better profitability in the daily report."},
+    {"name": "capacity",   "type": "int"},
+    {"name": "home_zone",  "type": "string"},
+    {"name": "driver_id",  "type": "string"},
+    {"name": "onboarded_sim_date", "type": {"type": "int", "logicalType": "date"}},
+    {"name": "updated_at", "type": {"type": "long", "logicalType": "timestamp-millis"}}
+  ]
+}

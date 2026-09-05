@@ -1,0 +1,27 @@
+{
+  "type": "record",
+  "namespace": "fleet.alerts",
+  "name": "BusinessAlert",
+  "doc": "A BUSINESS alert about a vehicle - distinct from a pipeline-health alert, which goes to Alertmanager instead. Conflating the two is a design failure: a dispatcher paged about Kafka lag is noise. See plan/09 section 4.",
+  "fields": [
+    {"name": "alert_id", "type": "string",
+     "doc": "sha1(vehicle_id, alert_type, window_start). Stable per episode, so at-least-once delivery is safe downstream."},
+    {"name": "vehicle_id", "type": "string"},
+    {"name": "alert_type", "type":
+      {"type": "enum", "name": "AlertType", "symbols": [
+        "VEHICLE_IDLE_PROLONGED", "VEHICLE_UNPROFITABLE", "VEHICLE_DETERIORATING",
+        "ZONE_UNDERSERVED", "EXPENSE_RECONCILIATION_EXCEPTION"]}},
+    {"name": "severity", "type":
+      {"type": "enum", "name": "Severity", "symbols": ["INFO", "WARNING", "CRITICAL"]}},
+    {"name": "detail",   "type": "string"},
+    {"name": "zone_id",  "type": ["null", "string"], "default": null},
+    {"name": "value",    "type": ["null", "double"], "default": null,
+     "doc": "The measured quantity that tripped the threshold (idle minutes, net profit, ...)."},
+    {"name": "threshold", "type": ["null", "double"], "default": null},
+    {"name": "raised_at_sim",  "type": {"type": "long", "logicalType": "timestamp-millis"}},
+    {"name": "raised_at_real", "type": {"type": "long", "logicalType": "timestamp-millis"}},
+    {"name": "source_layer", "type":
+      {"type": "enum", "name": "SourceLayer", "symbols": ["speed", "batch"]},
+     "doc": "Which Lambda layer raised it. Idle alerts come from the speed layer; profitability alerts from the batch layer."}
+  ]
+}

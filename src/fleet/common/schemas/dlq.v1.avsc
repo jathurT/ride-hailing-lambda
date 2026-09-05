@@ -1,0 +1,25 @@
+{
+  "type": "record",
+  "namespace": "fleet.dlq",
+  "name": "DeadLetterEnvelope",
+  "doc": "A rejected event, with enough context to trace it back to its exact position in the source log. Cleaning that silently drops data is not observable and not good engineering. See plan/04 section 6.",
+  "fields": [
+    {"name": "original_payload", "type": "bytes", "doc": "The raw Avro bytes as received."},
+    {"name": "rejection_reason", "type":
+      {"type": "enum", "name": "RejectionReason", "symbols": [
+        "NULL_COORDINATES", "COORDINATES_OUT_OF_BOUNDS", "NEGATIVE_FARE",
+        "IMPLAUSIBLE_SPEED", "FUTURE_TIMESTAMP", "STATUS_TRIP_MISMATCH",
+        "MISSING_FARE_ON_TRIP", "DESERIALIZATION_FAILED"]}},
+    {"name": "rejection_detail", "type": "string",
+     "doc": "Human-readable, with the offending value. e.g. 'speed_kmh=247.3 exceeds max 200'."},
+    {"name": "validator",  "type": "string"},
+    {"name": "vehicle_id", "type": ["null", "string"], "default": null},
+    {"name": "rejected_at_sim",  "type": {"type": "long", "logicalType": "timestamp-millis"}},
+    {"name": "rejected_at_real", "type": {"type": "long", "logicalType": "timestamp-millis"}},
+    {"name": "source_topic",     "type": "string"},
+    {"name": "source_partition", "type": "int",
+     "doc": "Partition and offset together make any dead-lettered event traceable to its exact position in the log."},
+    {"name": "source_offset",    "type": "long"},
+    {"name": "trace_id", "type": ["null", "string"], "default": null}
+  ]
+}

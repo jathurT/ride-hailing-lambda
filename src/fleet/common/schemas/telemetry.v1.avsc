@@ -1,0 +1,31 @@
+{
+  "type": "record",
+  "namespace": "fleet.telemetry",
+  "name": "TelemetryEvent",
+  "doc": "One GPS/telemetry ping from one vehicle. Kafka message key is vehicle_id, so all of a vehicle's pings land on one partition and stay ordered - the idle detector is a per-vehicle state machine and depends on that. See plan/04 section 1.2.",
+  "fields": [
+    {"name": "event_id",    "type": "string", "doc": "UUID. Idempotency/dedup key."},
+    {"name": "vehicle_id",  "type": "string", "doc": "Kafka partition key."},
+    {"name": "driver_id",   "type": "string"},
+    {"name": "trip_id",     "type": ["null", "string"], "default": null,
+     "doc": "Null when status is idle. Validated: null iff idle."},
+
+    {"name": "lat",         "type": ["null", "double"], "default": null},
+    {"name": "lon",         "type": ["null", "double"], "default": null},
+    {"name": "speed_kmh",   "type": ["null", "double"], "default": null},
+
+    {"name": "status", "type":
+      {"type": "enum", "name": "VehicleStatus", "symbols": ["idle", "enroute", "on_trip"]}},
+
+    {"name": "fare", "type": ["null", "double"], "default": null,
+     "doc": "Accumulated fare so far on this trip. Null unless on_trip. NOT an increment - summing this over a window double-counts. See plan/05 section 3.4."},
+
+    {"name": "event_time", "type": {"type": "long", "logicalType": "timestamp-millis"},
+     "doc": "SIMULATED time the ping occurred. Used for windowing, watermarking and Parquet partitioning."},
+    {"name": "ingest_time", "type": {"type": "long", "logicalType": "timestamp-millis"},
+     "doc": "REAL wall-clock time the ping was published. Used for latency metrics only."},
+
+    {"name": "producer_id",    "type": "string", "default": "sim-1"},
+    {"name": "schema_version", "type": "int",    "default": 1}
+  ]
+}
