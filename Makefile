@@ -94,11 +94,18 @@ mem: ## Container memory against the budget (plan/10 §1.3)
 ports: ## What is listening where
 	@echo "  Fleet API    http://localhost:8000/docs      <- the serving layer"
 	@echo "  Kafka UI     http://localhost:8080"
+	@echo "  Airflow      http://localhost:8082            (admin/admin)"
 	@echo "  Schema Reg   http://localhost:8081/subjects"
 	@echo "  Kafka        localhost:9092"
 	@echo "  MinIO console http://localhost:9001   (fleetadmin/fleetadmin)"
 	@echo "  Postgres      localhost:5442          (fleet/fleet, db fleet_mart)"
 	@echo "  Redis         localhost:6389"
+	@echo ""
+	@echo "  -- make up-obs --"
+	@echo "  Grafana      http://localhost:3000/d/fleet-pipeline-health  <- the dashboard"
+	@echo "  Prometheus   http://localhost:9090/targets"
+	@echo "  Pushgateway  http://localhost:9091   (Spark streaming metrics land here)"
+	@echo "  Alertmanager http://localhost:9093"
 	@echo ""
 	@echo "  NOTE: 5442/6389 are deliberate - this machine runs native"
 	@echo "        PostgreSQL and Redis on the default 5432/6379."
@@ -137,6 +144,106 @@ batch-check: ## The numbers that prove the backfill did what it claims
 	      USING (sim_date) ORDER BY 1;"
 
 # ---------------------------------------------------------------------------
+.PHONY: dag-check
+dag-check: ## Is the reconciliation DAG loaded, unpaused and succeeding?
+	@docker exec fleet-airflow-scheduler airflow dags list 2>/dev/null \
+	  | grep -E 'dag_id|fleet_' || echo "  scheduler not running - try 'make up'"
+	@echo ""
+	@echo "--- import errors (should be empty) ---"
+	@docker exec fleet-airflow-scheduler airflow dags list-import-errors 2>/dev/null || true
+	@echo ""
+	@echo "--- last 5 runs ---"
+	@docker exec fleet-airflow-scheduler \
+	  airflow dags list-runs -d fleet_daily_reconciliation --no-backfill 2>/dev/null \
+	  | head -9 || true
+
+.PHONY: dag-trigger
+dag-trigger: ## Run the DAG now for one sim date.  make dag-trigger DATE=2026-03-04
+	@test -n "$(DATE)" || { echo "usage: make dag-trigger DATE=YYYY-MM-DD"; exit 2; }
+	@docker exec fleet-airflow-scheduler airflow dags trigger \
+	  fleet_daily_reconciliation --conf '{"sim_date":"$(DATE)"}'
+	@echo "triggered as a RESTATEMENT - the watermark must not move to $(DATE)"
+
+.PHONY: reconcile
+reconcile: ## Speed-vs-batch divergence for a sim date.  make reconcile DATE=2026-03-04
+	@test -n "$(DATE)" || { echo "usage: make reconcile DATE=YYYY-MM-DD"; exit 2; }
+	@docker exec -e PGPASSWORD=fleet fleet-postgres-mart psql -U fleet -d fleet_mart -c "\
+	  SELECT metric, count(*) AS zones, \
+	         round(avg(abs(delta_pct)),2) AS avg_abs_delta_pct, \
+	         round(max(abs(delta_pct)),2) AS worst_pct \
+	    FROM mart.reconciliation_delta WHERE sim_date='$(DATE)' \
+	   GROUP BY metric ORDER BY metric;"
+	@echo "plan/07 section 5.4 expects 1-3% on active_vehicles, up to 8% on earnings."
+	@echo "Exactly 0.00 would mean one side is reading the other, not computing it."
+
+# ---------------------------------------------------------------------------
+##@ Chaos - prove the alerts actually fire
+
+.PHONY: chaos-kill-producer
+chaos-kill-producer: ## Stop the telemetry producer. NoTelemetryIngested should fire in ~1 min.
+	@docker stop fleet-telemetry-producer >/dev/null
+	@echo "producer stopped at $$(date -u +%H:%M:%S)"
+	@echo "watch:  http://localhost:9093          (alertmanager)"
+	@echo "        http://localhost:9090/alerts   (pending -> firing)"
+	@echo "restore with: make chaos-heal   (NOT 'docker start' - see that target)"
+
+.PHONY: chaos-heal
+chaos-heal: ## Restart whatever chaos stopped, and watch the alert resolve
+	@# `docker compose up -d`, NOT `docker start`.
+	@#
+	@# A container brought back with `docker start` can come up WITHOUT its published
+	@# host ports. Observed here: after stopping and starting postgres-mart and redis
+	@# for the degradation demo, `docker port` listed nothing for either, while every
+	@# other container kept its bindings. Nothing inside the Docker network noticed -
+	@# the API talks to postgres-mart:5432 over the network and stayed healthy - so
+	@# the pipeline looked fine and only host-originating connections broke. The
+	@# symptom was six integration tests timing out against localhost:5442 while
+	@# `make psql` (which uses docker exec) worked perfectly.
+	@#
+	@# `up -d` reconciles the container against the compose file and restores them.
+	@RESUME=1 $(COMPOSE) up -d telemetry-producer redis postgres-mart >/dev/null 2>&1 || true
+	@echo "restored at $$(date -u +%H:%M:%S) - alerts should resolve within ~1 min"
+	@echo "host ports: $$(docker port fleet-postgres-mart | head -1 || echo 'NONE - run make up')"
+
+.PHONY: alerts
+alerts: ## Current alert state, and how long each has been firing
+	@curl -s localhost:9090/api/v1/rules | python3 -c "import json,sys; gs=json.load(sys.stdin)['data']['groups']; rs=[r for g in gs for r in g['rules'] if r['type']=='alerting']; print(f'{len(rs)} rules loaded'); [print('  {:<26} {:<8} {}'.format(r['name'], r['state'], r['labels'].get('severity',''))) for r in rs]" || echo "  prometheus not reachable"
+	@echo ""
+	@curl -s localhost:9093/api/v2/alerts | python3 -c "import json,sys; a=json.load(sys.stdin); print(f'{len(a)} alert(s) in alertmanager'); [print('  ', x['labels'].get('alertname'), '->', x['status']['state']) for x in a]" 2>/dev/null || echo "  alertmanager has no active alerts"
+
+.PHONY: report
+report: ## Build the LaTeX report PDF
+	@$(MAKE) --no-print-directory -C docs/report main.pdf
+
+.PHONY: report-check
+report-check: ## Build the report and refuse unfilled cover-page placeholders
+	@$(MAKE) --no-print-directory -C docs/report check
+
+.PHONY: diagrams
+diagrams: ## Rebuild the report's TikZ diagrams (needs pdflatex)
+	@$(MAKE) --no-print-directory -C docs/diagrams all
+
+.PHONY: figures
+figures: ## Re-capture the report's screenshots from the running stack
+	@.venv/bin/python scripts/capture_figures.py
+
+.PHONY: obs-check
+obs-check: ## Are the observability targets actually being scraped?
+	@echo "--- prometheus targets ---"
+	@curl -s localhost:9090/api/v1/targets | python3 -c "import json,sys; ts=json.load(sys.stdin)['data']['activeTargets']; [print('  {:<15} {:<6} {}'.format(t['labels'].get('job','?'), t['health'], t['scrapeUrl'])) for t in sorted(ts, key=lambda x: x['labels'].get('job',''))]" || echo "  prometheus not reachable - is the obs profile up?"
+	@echo ""
+	@echo "--- spark streaming metrics in the pushgateway ---"
+	@echo "  $$(curl -s localhost:9091/metrics | grep -c '^spark_streaming_') spark_streaming_* series (0 means the listener is NOT pushing)"
+	@echo "  $$(curl -s localhost:9091/metrics | grep -oE 'query="[a-z_]+"' | sort -u | wc -l) distinct queries reporting"
+	@echo ""
+	@echo "--- grafana ---"
+	@if curl -sf -o /dev/null localhost:3000/api/dashboards/uid/fleet-pipeline-health; then \
+	  echo "  dashboard provisioned: http://localhost:3000/d/fleet-pipeline-health"; \
+	else \
+	  echo "  dashboard NOT provisioned"; \
+	fi
+	@echo "  datasources: $$(curl -s localhost:3000/api/datasources | grep -oE '"name":"[^"]*"' | sed 's/"name"://' | tr '\n' ' ')"
+
 .PHONY: topics
 topics: ## List topics with partition counts and cleanup policy
 	@docker exec fleet-kafka kafka-topics --bootstrap-server localhost:9092 --list
