@@ -1,0 +1,486 @@
+{
+  "uid": "fleet-operations",
+  "title": "Fleet \u00b7 Operations (live)",
+  "description": "The live half of the business question \u2014 fleet utilization and earnings by area, right now. Every panel is served through the project's own FastAPI serving layer via the Infinity datasource, so the dashboard exercises the merge rather than bypassing it (plan/07 \u00a76).",
+  "tags": [
+    "fleet",
+    "lambda",
+    "business"
+  ],
+  "timezone": "utc",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Right now \u2014 from the speed view, via /api/v1/fleet/live",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Active vehicles",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "fleet-api"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "fleet-api"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/v1/fleet/live",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "total_active",
+              "text": "Active vehicles",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "description": "Distinct vehicles seen in the current 15-simulated-minute window. A HyperLogLog estimate (~2% error) \u2014 the speed layer trades exactness for a bounded state store, which is the Lambda speed-layer contract.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Trips in window",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "fleet-api"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "fleet-api"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/v1/fleet/live",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "total_trips",
+              "text": "Trips in window",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "description": "Trips active in the current window, not trips completed today.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Idle ratio",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "fleet-api"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "fleet-api"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/v1/fleet/live",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "fleet_idle_ratio",
+              "text": "Idle ratio",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "description": "Share of pings in the window whose status was idle. This is the only figure here that is independent of window width, which makes it the one worth comparing against the batch layer.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Zones reporting",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "fleet-api"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "fleet-api"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/v1/fleet/live",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "zones_reporting",
+              "text": "Zones reporting",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "description": "Zones that wrote to Redis in the last window. Below 12 means a zone has gone quiet \u2014 or that the activity query has fallen behind.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "row",
+      "title": "By area \u2014 the 'utilization and earnings by area' half of the question",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "panels": []
+    },
+    {
+      "id": 7,
+      "type": "barchart",
+      "title": "Earnings by zone",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "fleet-api"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "fleet-api"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/v1/fleet/zones",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "zone_id",
+              "text": "Zone",
+              "type": "string"
+            },
+            {
+              "selector": "earnings",
+              "text": "Earnings",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "description": "Live earnings per zone from the speed view. Revenue is recognised at TRIP COMPLETION, so a zone with long trips in progress reads low until they finish \u2014 the figure lags by up to one trip duration by design, and the batch layer is what corrects it.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "xTickLabelRotation": 0,
+        "legend": {
+          "showLegend": false
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Zone detail",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "fleet-api"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "fleet-api"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/v1/fleet/zones",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "zone_id",
+              "text": "Zone",
+              "type": "string"
+            },
+            {
+              "selector": "active_vehicles",
+              "text": "Vehicles",
+              "type": "number"
+            },
+            {
+              "selector": "trips",
+              "text": "Trips",
+              "type": "number"
+            },
+            {
+              "selector": "earnings",
+              "text": "Earnings",
+              "type": "number"
+            },
+            {
+              "selector": "idle_ratio",
+              "text": "Idle ratio",
+              "type": "number"
+            },
+            {
+              "selector": "avg_speed_kmh",
+              "text": "Avg km/h",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "description": "Every zone in the grid, including quiet ones. Zones are enumerated from the static grid rather than by scanning Redis keys: a zone that has gone silent must still appear, because 'the zone vanished' and 'the zone is idle' are different problems and look identical if you only return the keys that exist.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 9,
+      "type": "row",
+      "title": "Idle alerts \u2014 the threshold-based alerting the brief asks for",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "panels": []
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Vehicles idle beyond threshold",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "fleet-api"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "fleet-api"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/v1/alerts/idle?limit=50",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "raised_at_sim",
+              "text": "Raised (sim)",
+              "type": "string"
+            },
+            {
+              "selector": "vehicle_id",
+              "text": "Vehicle",
+              "type": "string"
+            },
+            {
+              "selector": "severity",
+              "text": "Severity",
+              "type": "string"
+            },
+            {
+              "selector": "idle_minutes",
+              "text": "Idle (sim min)",
+              "type": "number"
+            },
+            {
+              "selector": "zone_id",
+              "text": "Zone",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "description": "Produced by the stateful streaming detector (Q3) and published to fleet.alerts.v1. These are BUSINESS alerts \u2014 about vehicles \u2014 and are deliberately separate from the pipeline-health alerts in Alertmanager, which are about the system. Conflating the two is how an on-call rota learns to ignore its own alerts. Thresholds: 45 simulated minutes warning, 90 critical.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      }
+    }
+  ]
+}

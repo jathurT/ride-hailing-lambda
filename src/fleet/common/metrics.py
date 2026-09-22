@@ -123,6 +123,39 @@ def serve(port: int) -> ThreadingHTTPServer:
     return server
 
 
+# --- serving layer (plan/09 section 3) ------------------------------------
+
+serving_batch_watermark_age_sim_days = Gauge(
+    "serving_batch_watermark_age_sim_days",
+    "Simulated days between the batch high-water mark and the current simulated date. "
+    "The single most important number about the batch layer: a watermark that stops "
+    "advancing is the batch layer having quietly died, and from every other angle "
+    "that looks identical to a healthy pipeline.",
+)
+
+serving_degraded_responses_total = Counter(
+    "serving_degraded_responses_total",
+    "Responses served with one store unreachable, by which store was missing. "
+    "Degrading is correct behaviour, so this is not an error counter - but a rate "
+    "that stays above zero means the demo is running on half the architecture.",
+    ["missing_store"],
+)
+
+serving_merge_boundary_crossings_total = Counter(
+    "serving_merge_boundary_crossings_total",
+    "Requests whose date range spanned the batch/speed boundary, so both views "
+    "contributed rows. This is the reconciliation actually happening; a flat zero "
+    "means every request landed wholly inside one view and the merge was never "
+    "exercised.",
+)
+
+serving_uncovered_dates_total = Counter(
+    "serving_uncovered_dates_total",
+    "Requested simulated dates that neither view could answer for, because the batch "
+    "layer has fallen more than one simulated day behind the clock.",
+)
+
+
 # --- pushgateway ----------------------------------------------------------
 #
 # Spark's Structured Streaming queries cannot be scraped. They run inside the driver

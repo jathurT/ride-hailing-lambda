@@ -1,0 +1,46 @@
+# Alertmanager routing.
+#
+# Deliberately minimal: there is no Slack, no PagerDuty and no email in a local demo
+# stack, and configuring a receiver that cannot actually deliver would be theatre.
+# What this DOES demonstrate is the thing that matters architecturally - grouping,
+# routing by severity, and inhibition - all of which are visible in the UI.
+
+global:
+  resolve_timeout: 1m
+
+route:
+  receiver: default
+  # Group by alertname AND stage so an ingest failure and a serving failure never
+  # collapse into one notification. They have different causes and different runbooks.
+  group_by: [alertname, stage]
+  # Short waits because a simulated day is five real minutes. The usual 30s/5m
+  # defaults would mean an alert arriving after the incident it describes is over.
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 1h
+  routes:
+    - matchers: [severity="critical"]
+      receiver: critical
+      group_wait: 5s
+
+receivers:
+  - name: default
+  - name: critical
+
+# If nothing is being ingested, a stalled streaming query is a CONSEQUENCE, not a
+# separate incident - the queries have no input, so of course they report no progress.
+# Suppressing them keeps the notification pointing at the producer instead of burying
+# it under five Spark alerts.
+#
+# Measured before this was corrected: stopping the producer produced EIGHT alerts -
+# one NoTelemetryIngested, one ProducerTargetDown, and five StreamingQueryStalled
+# (one per query). The first version of this rule matched `severity="warning"` with
+# `equal: [stage]`, which suppressed nothing at all: the consequential alerts are
+# critical, not warnings, and they carry stage=process while the cause carries
+# stage=ingest. An inhibition that matches nothing is indistinguishable from no
+# inhibition, and it had to be watched to find that out.
+inhibit_rules:
+  - source_matchers: [alertname="NoTelemetryIngested"]
+    target_matchers: [alertname="StreamingQueryStalled"]
+  - source_matchers: [alertname="ProducerTargetDown"]
+    target_matchers: [alertname="NoTelemetryIngested"]

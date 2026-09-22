@@ -1,0 +1,35 @@
+# Datasources, provisioned as code (plan/09 section 7).
+#
+# "Provisioned" is the requirement, not a convenience: a dashboard that someone had
+# to click together by hand is not reproducible, and `make clean && make up-obs` on a
+# fresh machine has to arrive at the same screen or the demo is a one-off.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: fleet-prom
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 5s          # must match the scrape interval, or rate() lies
+      httpMethod: POST
+
+  # The serving layer as a datasource. plan/07 section 6 argues for this over the
+  # Redis plugin: pointing Grafana at our own FastAPI means the dashboard EXERCISES
+  # the merge - a panel that breaks when the API breaks is a panel that is telling
+  # the truth about the system. Reading Redis directly would bypass the very layer
+  # this project is marked on.
+  #
+  # Requires the Infinity plugin (installed via GF_INSTALL_PLUGINS). If the plugin
+  # cannot be fetched, only the API-backed row at the bottom of the dashboard fails;
+  # every Prometheus panel above it still renders.
+  - name: Fleet API
+    type: yesoreyeram-infinity-datasource
+    uid: fleet-api
+    access: proxy
+    url: http://api:8000
+    jsonData:
+      global_queries: []

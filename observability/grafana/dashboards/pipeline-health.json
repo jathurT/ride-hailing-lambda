@@ -1,0 +1,1390 @@
+{
+  "uid": "fleet-pipeline-health",
+  "title": "Fleet \u00b7 Pipeline Health",
+  "description": "End-to-end health of the Lambda pipeline, one column per stage: INGEST, PROCESS, STORE, SERVE. Provisioned from observability/grafana/dashboards/ \u2014 edits made here are lost on container restart; change the file.",
+  "tags": [
+    "fleet",
+    "lambda",
+    "pipeline"
+  ],
+  "timezone": "utc",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m"
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "At a glance \u2014 one number per stage",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "INGEST \u00b7 events/sec",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(events_produced_total{status=\"ok\"}[1m]))",
+          "instant": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "reqps",
+          "decimals": 1,
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "description": "Telemetry accepted by Kafka. Zero here means the producers are down and nothing below this panel means anything."
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "PROCESS \u00b7 seconds since last Spark progress",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(time() - spark_streaming_last_progress_timestamp)",
+          "instant": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 60
+              },
+              {
+                "color": "red",
+                "value": 120
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "s",
+          "decimals": 0,
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "description": "\u2605 THE liveness signal for the speed layer. Consumer lag cannot measure these queries \u2014 they checkpoint their own offsets and never commit to a group, so lag reads zero whether they are keeping up or dead. A query that stops emits no progress, so the AGE of this timestamp is the only thing that separates 'idle' from 'died an hour ago'."
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "STORE \u00b7 sink write errors/sec",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(sink_write_errors_total[5m]))",
+          "instant": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.01
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 2,
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "description": "Writes to Redis, Parquet or Kafka that failed. Anything sustained above zero means the speed view is drifting out of date silently."
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "SERVE \u00b7 batch watermark age (sim days)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(serving_batch_watermark_age_sim_days)",
+          "instant": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 2
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "description": "Simulated days between the batch high-water mark and now. 1 is healthy (yesterday is complete). Climbing means the batch layer has stopped, which looks identical to a healthy pipeline from every other angle."
+    },
+    {
+      "id": 6,
+      "type": "row",
+      "title": "INGEST \u2014 the simulated sources",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "panels": []
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Events produced /sec by topic",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 0,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (topic) (rate(events_produced_total{status=\"ok\"}[1m]))",
+          "legendFormat": "{{topic}} ok",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (topic) (rate(events_produced_total{status!=\"ok\"}[1m]))",
+          "legendFormat": "{{topic}} FAILED",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Delivery-callback outcomes, not produce() calls. A gap between ok and failed is the broker rejecting writes."
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Producer errors and backpressure /sec",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 6,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (error_type) (rate(producer_errors_total[1m]))",
+          "legendFormat": "error: {{error_type}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "rate(producer_backpressure_events_total[1m])",
+          "legendFormat": "backpressure",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        },
+        {
+          "refId": "C",
+          "expr": "rate(vehicle_resyncs_total[1m])",
+          "legendFormat": "vehicle resyncs",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Backpressure is deliberate \u2014 the producer blocks rather than dropping telemetry. Resyncs rising means the host cannot sustain the event rate: a capacity signal, not a correctness one. This condition used to crash the producer, and Docker's restart policy hid it behind healthy throughput."
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Defects injected /sec by type",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 12,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (defect_type) (rate(defects_injected_total[1m]))",
+          "legendFormat": "{{defect_type}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "The simulator corrupts a known fraction of events on purpose. This line is the control for the DLQ: what goes in here must come out of the dead-letter path, and a mismatch is a validator that is not catching what it claims to."
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Simulated clock \u2014 day index and drift",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 18,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(sim_clock_day_index)",
+          "legendFormat": "sim day index",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "max(sim_clock_drift_seconds)",
+          "legendFormat": "drift (s)",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Every container derives simulated time from one shared anchor file. Drift between them means two services disagree about what day it is, and every windowed aggregate downstream becomes untrustworthy."
+    },
+    {
+      "id": 11,
+      "type": "row",
+      "title": "PROCESS \u2014 Spark Structured Streaming (pushed, not scraped)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "panels": []
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Rows/sec in and out, per query",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 0,
+        "y": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "spark_streaming_input_rows_per_second",
+          "legendFormat": "{{query}} in",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "spark_streaming_processed_rows_per_second",
+          "legendFormat": "{{query}} processed",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Input persistently above processed means the query is falling behind. Both at zero is NOT necessarily bad \u2014 check the progress-age panel, which is the real liveness signal."
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Micro-batch duration per query",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 6,
+        "y": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "spark_streaming_batch_duration_seconds",
+          "legendFormat": "{{query}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Converted from Spark's milliseconds. A duration approaching the trigger interval (10s) means the next batch starts late and lag compounds."
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "State store rows per query",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 12,
+        "y": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "spark_streaming_state_rows",
+          "legendFormat": "{{query}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Stateful queries only \u2014 dedup and idle detection. Monotonic growth is the classic watermark bug: state that is never evicted eventually takes the driver out of memory."
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Watermark lag (SIMULATED seconds)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 18,
+        "y": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "spark_streaming_watermark_lag_seconds",
+          "legendFormat": "{{query}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Gap between the newest event time and the watermark. These are SIMULATED seconds: at the 288x speed-up, 1800 simulated seconds is about 6 real seconds. The number is meaningless without that conversion."
+    },
+    {
+      "id": 16,
+      "type": "row",
+      "title": "STORE \u2014 sinks, lake, mart and alerts",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      },
+      "panels": []
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Sink writes /sec",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 0,
+        "y": 22
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (sink) (rate(sink_writes_total[1m]))",
+          "legendFormat": "{{sink}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Per-sink write throughput. The redis sink stopping while the parquet sink continues means the speed view is frozen but the master dataset is fine \u2014 a partial failure the API will report as degraded."
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Sink write errors /sec",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 6,
+        "y": 22
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (sink) (rate(sink_write_errors_total[5m]))",
+          "legendFormat": "{{sink}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Should be flat zero. A sink erroring silently is how the speed view goes stale without anything appearing to be wrong."
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Business alerts emitted /sec",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 12,
+        "y": 22
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (severity) (rate(business_alerts_emitted_total[5m]))",
+          "legendFormat": "{{severity}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Alerts about VEHICLES, as distinct from pipeline-health alerts about the system. Split by severity on purpose: forty WARNING and forty CRITICAL are the same number on a single counter, and only one needs acting on."
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Kafka consumer-group lag",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 18,
+        "y": 22
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (consumergroup) (kafka_consumergroup_lag)",
+          "legendFormat": "{{consumergroup}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Real consumer groups only. This does NOT measure the Spark queries \u2014 they never commit offsets to a group, so their lag reads zero whether healthy or dead. Forcing kafka.group.id to make this work killed the DLQ query after ~4,500 micro-batches."
+    },
+    {
+      "id": 21,
+      "type": "row",
+      "title": "SERVE \u2014 the API, and the merge actually happening",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 29
+      },
+      "panels": []
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "API requests /sec by endpoint",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 0,
+        "y": 30
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (handler) (rate(http_requests_total[1m]))",
+          "legendFormat": "{{handler}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "From prometheus-fastapi-instrumentator. Includes the health probes, so a flat non-zero baseline is the compose healthcheck, not traffic."
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "API latency p95 / p50",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 6,
+        "y": 30
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "p95 rising while p50 stays flat is one slow store, not a slow API \u2014 usually the batch half hitting Postgres without an index."
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Merge boundary crossings /sec",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 12,
+        "y": 30
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(serving_merge_boundary_crossings_total[5m])",
+          "legendFormat": "both views contributed",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "rate(serving_uncovered_dates_total[5m])",
+          "legendFormat": "uncovered dates",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "\u2605 The reconciliation, happening. A flat ZERO here means every request landed wholly inside one view and the merge \u2014 the thing this project is marked on \u2014 was never exercised. Uncovered dates rising means the batch layer has fallen more than one simulated day behind."
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Degraded responses /sec by missing store",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "fleet-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 18,
+        "y": 30
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (missing_store) (rate(serving_degraded_responses_total[5m]))",
+          "legendFormat": "{{missing_store}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "fleet-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Serving partial data with X-Data-Degraded is CORRECT behaviour, so this is not an error counter. But a rate that stays above zero means the demo is running on half the architecture."
+    }
+  ]
+}

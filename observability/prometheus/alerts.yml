@@ -1,0 +1,165 @@
+# Alert rules (plan/09 section 4.1).
+#
+# The assignment requires, as a MINIMUM: "At least one basic alert or health-check
+# rule (e.g. no data received in N minutes, error rate above threshold)."
+#
+# Five rules rather than the fourteen in plan/09, chosen on one criterion: each can be
+# DEMONSTRATED firing. A rule that has never fired is a rule nobody knows works, and an
+# alert file full of untested expressions is worse than a short one that has been seen
+# to go red and back to green.
+#
+# TWO FAMILIES, DELIBERATELY SEPARATE
+#
+# These are PIPELINE-HEALTH alerts - they fire about the SYSTEM, and they route to
+# Alertmanager and eventually to a human on call. Alerts about VEHICLES (a car idle too
+# long, a vehicle becoming unprofitable) are business events: they are produced by the
+# pipeline into `fleet.alerts.v1` as data, and they belong to dispatch operations, not
+# to whoever is paged at 3am. Mixing the two is how an on-call rota learns to ignore
+# its own alerts.
+#
+# ON `for:` DURATIONS AND SIMULATED TIME
+#
+# Every duration here is REAL time, not simulated. Prometheus knows nothing about the
+# 288x clock. A `for: 1m` is one real minute, during which roughly 4.8 simulated hours
+# pass - so these fire quickly in simulated terms and are demo-able inside a session.
+
+groups:
+  - name: fleet-pipeline-health
+    interval: 15s
+    rules:
+
+      # The assignment's own example: "no data received in N minutes". If this fires,
+      # nothing below it means anything - every other metric will look calm because
+      # there is no traffic to be alarmed about.
+      - alert: NoTelemetryIngested
+        # `or vector(0)` is NOT decoration - without it this rule never fires.
+        #
+        # Found by testing it: the producer was stopped and the alert stayed inactive
+        # for six and a half minutes. When the process dies its scrape target goes
+        # down, the series goes stale and DISAPPEARS, and `sum(rate(...))` over no
+        # series returns an EMPTY VECTOR - not zero. `empty == 0` is empty, so the
+        # rule for "no data received" was itself defeated by there being no data.
+        #
+        # `or vector(0)` substitutes a literal 0 when the left side is empty, which
+        # is the condition we actually meant. This is why an alert nobody has watched
+        # fire is not evidence of anything.
+        expr: (sum(rate(events_produced_total{status="ok"}[2m])) or vector(0)) == 0
+        for: 1m
+        labels:
+          severity: critical
+          stage: ingest
+        annotations:
+          summary: "No telemetry reaching Kafka for 1 minute"
+          description: >-
+            The producer has delivered zero events for a full minute. At a configured
+            240 events/second this cannot be a quiet period - the producer is dead, the
+            broker is refusing writes, or the two cannot see each other. Every
+            downstream panel will look healthy because it has nothing to process.
+          runbook: "make logs SVC=telemetry-producer; make ps"
+
+      # The complement of the rule above, and a genuinely different incident.
+      #
+      # NoTelemetryIngested says "no events are arriving" - which could be a crashed
+      # producer, a broker refusing writes, or a producer that is alive but stuck.
+      # This one says specifically "the process is not there to scrape". `up` is
+      # synthesised by Prometheus for every configured target, so unlike the metric
+      # itself it is never absent - it goes to 0 instead of vanishing, which is
+      # exactly the property the rule above had to work around.
+      - alert: ProducerTargetDown
+        expr: up{job=~"producers|streaming-job|api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          stage: ingest
+        annotations:
+          summary: "Scrape target {{ $labels.instance }} is down"
+          description: >-
+            Prometheus cannot reach {{ $labels.instance }} ({{ $labels.job }}). The
+            process is gone or unreachable, as distinct from running but idle - and
+            while it is down its metrics are absent rather than zero, so any rule
+            written against those metrics is blind.
+          runbook: "make ps; make logs SVC={{ $labels.job }}"
+
+      # ★ The one that cannot be replaced by anything else.
+      #
+      # Consumer lag CANNOT measure these queries: Structured Streaming checkpoints its
+      # own offsets and never commits to a consumer group, so lag reads zero whether a
+      # query is keeping up or has been dead for hours. Verified on this stack -
+      # `kafka-consumer-groups --list` returns nothing at all. Forcing `kafka.group.id`
+      # to make lag work killed the DLQ query after ~4,500 micro-batches.
+      #
+      # So the signal is the AGE of the last progress timestamp the driver pushed. A
+      # query processing zero rows may be perfectly healthy and idle; a query that has
+      # stopped emits no progress at all, and only the age distinguishes them.
+      - alert: StreamingQueryStalled
+        expr: time() - max by (query) (spark_streaming_last_progress_timestamp) > 120
+        for: 1m
+        labels:
+          severity: critical
+          stage: process
+        annotations:
+          summary: "Spark streaming query {{ $labels.query }} has not progressed for 2 minutes"
+          description: >-
+            No StreamingQueryProgress event from {{ $labels.query }} in over two
+            minutes, against a 10-second trigger. This is the ONLY reliable liveness
+            signal for the speed layer - consumer lag cannot see these queries.
+          runbook: "make logs SVC=streaming-job; check the Spark UI on :4040"
+
+      # Poison pills. The simulator injects a known defect rate on purpose, so a small
+      # steady DLQ stream is CORRECT and expected - the threshold is set above it. A
+      # spike means the stream shape changed or the validator broke.
+      - alert: HighDLQRate
+        # Derived from the two queries' output-row counts rather than a counter in
+        # the DLQ sink: that sink writes straight to Kafka with no foreachBatch, so
+        # instrumenting it directly would mean restructuring the query and resetting
+        # its checkpoint. q_master writes what validated, q_dlq writes what did not.
+        expr: >-
+          spark_streaming_output_rows_last_batch{query="q_dlq"}
+            / clamp_min(spark_streaming_output_rows_last_batch{query="q_master"}, 1) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          stage: process
+        annotations:
+          summary: "More than 5% of events are being dead-lettered"
+          description: >-
+            The injected defect rate is ~1%. Sustained rejection above 5% means either
+            a producer is emitting a shape the validator does not accept, or the
+            validator itself has become too strict and is discarding good data.
+          runbook: "inspect fleet.telemetry.dlq in Kafka UI; the reason field is on each record"
+
+      # A silently dead batch layer. This is the failure mode with no other symptom:
+      # the speed layer keeps serving, the API keeps answering, the dashboard stays
+      # green, and the only evidence is a number that stops going up.
+      - alert: BatchWatermarkStale
+        expr: max(serving_batch_watermark_age_sim_days) > 2
+        for: 5m
+        labels:
+          severity: warning
+          stage: serve
+        annotations:
+          summary: "Batch high-water mark is {{ $value }} simulated days behind"
+          description: >-
+            The batch layer should complete one simulated day per Airflow run. A
+            watermark drifting beyond two days means runs are failing or overrunning
+            their schedule, and the serving layer is answering more and more of its
+            range from the approximate speed view without anything appearing broken.
+          runbook: "make dag-check; then make backfill DAYS=7 to catch up"
+
+      # Degrading is CORRECT behaviour, so this is not an error counter. It fires
+      # because a sustained degraded rate means the demo is running on half the
+      # architecture and the exact figures are silently unavailable.
+      - alert: ServingLayerDegraded
+        expr: sum by (missing_store) (rate(serving_degraded_responses_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          stage: serve
+        annotations:
+          summary: "Serving layer degraded - {{ $labels.missing_store }} unreachable"
+          description: >-
+            The API is answering with one store down and setting X-Data-Degraded. That
+            is the designed behaviour and responses are still valid, but half the
+            architecture is missing: with postgres down there are no exact figures, and
+            with redis down there is no live view.
+          runbook: "curl localhost:8000/health/deep"

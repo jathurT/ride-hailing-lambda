@@ -76,6 +76,29 @@ def progress_gauges(progress: Any, now: float | None = None) -> dict[str, float]
     if duration_ms is not None:
         out["spark_streaming_batch_duration_seconds"] = duration_ms / 1000.0
 
+    # Rows IN and OUT for this micro-batch.
+    #
+    # The ratio of one query's output to another's is what makes a dead-letter RATE
+    # expressible without touching the DLQ sink. That sink writes straight to Kafka
+    # with no `foreachBatch`, so adding a counter inside it would mean restructuring
+    # the query and invalidating its checkpoint - a real cost for a metric that can be
+    # derived from progress events we already receive.
+    #
+    #   dlq rate = output_rows{query="q_dlq"} / output_rows{query="q_master"}
+    #
+    # q_master writes the events that validated; q_dlq writes the ones that did not.
+    rows_in = _num(getattr(progress, "numInputRows", None))
+    if rows_in is not None:
+        out["spark_streaming_input_rows_last_batch"] = rows_in
+
+    sink = getattr(progress, "sink", None)
+    rows_out = _num(getattr(sink, "numOutputRows", None)) if sink is not None else None
+    if rows_out is not None and rows_out >= 0:
+        # Spark reports -1 when a sink cannot count its own output. Pushing that would
+        # put a negative on a rows-written panel, which reads as a bug in the pipeline
+        # rather than a gap in the instrumentation.
+        out["spark_streaming_output_rows_last_batch"] = rows_out
+
     state_rows = 0.0
     for op in getattr(progress, "stateOperators", None) or []:
         rows = _num(getattr(op, "numRowsTotal", None))

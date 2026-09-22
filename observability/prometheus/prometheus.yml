@@ -1,0 +1,79 @@
+# Prometheus scrape configuration (plan/09 section 3).
+#
+# A 5-second interval, not the usual 15. The simulated clock runs at 288x
+# (SIM_DAY_SECONDS=300), so a whole simulated day passes in five real minutes. At a
+# 15s interval a simulated day would be twenty data points and every dashboard panel
+# would be a staircase. The cost is a denser TSDB, which is irrelevant at this
+# retention.
+#
+# Nothing here scrapes Spark. It cannot be scraped - the Structured Streaming queries
+# live in the driver with no HTTP endpoint - so the driver pushes to the Pushgateway
+# instead. See the honor_labels note on that job below.
+
+global:
+  scrape_interval: 5s
+  scrape_timeout: 4s
+  evaluation_interval: 15s
+  external_labels:
+    stack: fleet
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # --- ingestion: both simulated sources expose /metrics on their own port ---
+  - job_name: producers
+    static_configs:
+      - targets: ["telemetry-producer:8001"]
+        labels: { component: telemetry-producer, stage: ingest }
+      - targets: ["expense-dropper:8002"]
+        labels: { component: expense-dropper, stage: ingest }
+
+  # The Spark driver's APPLICATION-level metrics - sink writes, sink errors, business
+  # alerts. Distinct from the streaming-query metrics, which cannot be scraped and
+  # arrive via the Pushgateway below. Missing this target leaves the dashboard's
+  # entire STORE column empty while everything else looks healthy.
+  - job_name: streaming-job
+    static_configs:
+      - targets: ["streaming-job:8001"]
+        labels: { component: speed-layer, stage: process }
+
+  # --- serving layer: route metrics from prometheus-fastapi-instrumentator ---
+  - job_name: api
+    static_configs:
+      - targets: ["api:8000"]
+        labels: { component: serving-api, stage: serve }
+
+  # --- Spark, indirectly ---
+  #
+  # honor_labels is REQUIRED here. The driver pushes with a `query` grouping key,
+  # and without honor_labels Prometheus would overwrite the pushed labels with the
+  # Pushgateway's own job/instance - collapsing five distinct streaming queries into
+  # one series and silently averaging them together.
+  - job_name: pushgateway
+    honor_labels: true
+    static_configs:
+      - targets: ["pushgateway:9091"]
+        labels: { stage: process }
+
+  # --- Kafka broker and consumer-group lag ---
+  #
+  # Useful for the DLQ consumer and anything else with a real consumer group. It does
+  # NOT measure the Spark queries: they checkpoint their own offsets and never commit
+  # to a group, so their lag reads zero whether they are healthy or dead. Setting
+  # kafka.group.id to "fix" that killed the DLQ query after ~4,500 micro-batches
+  # (plan/09 section 3).
+  - job_name: kafka
+    static_configs:
+      - targets: ["kafka-exporter:9308"]
+        labels: { component: kafka, stage: ingest }
