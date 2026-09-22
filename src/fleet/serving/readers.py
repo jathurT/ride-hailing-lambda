@@ -12,8 +12,12 @@ what lets the merge express its rule once - "if this store is unreachable, serve
 the other one has and say so" - which is the degraded behaviour plan/07 section 5.2
 requires and the demo is meant to show.
 
-That means a bare `except Exception` in each adapter. It is deliberate and narrow:
-it wraps exactly one store call, re-raises as one type, and never swallows anything.
+That means a bare `except Exception` in each adapter, and it is CLASSIFIED rather
+than blanket - see `_is_unreachable`. Only connection-shaped failures become
+`StoreUnavailableError` and degrade the response. Bad SQL, a missing column or a type
+error propagates untouched and becomes a 500, because a programming error is a fault
+in us, not a degraded dependency, and reporting it as "postgres unavailable" sends
+whoever is debugging it to the wrong machine entirely.
 """
 
 from __future__ import annotations
@@ -39,6 +43,42 @@ class StoreUnavailableError(RuntimeError):
         self.cause = cause
 
 
+def _is_unreachable(exc: BaseException) -> bool:
+    """Is this store DOWN, or did we send it something broken?
+
+    The distinction decides whether the serving layer degrades or reports a fault,
+    and getting it wrong is how a bug hides.
+
+    Observed live: `fetch_unprofitable` sent an untyped NULL that Postgres could not
+    infer a type for ("could not determine data type of parameter $1"). Because this
+    module originally wrapped EVERY exception as StoreUnavailableError, the endpoint
+    answered 503 "batch view unavailable: postgres" while Postgres was healthy and
+    every other endpoint was serving from it happily. The message pointed at the
+    infrastructure; the bug was in our own SQL.
+
+    So: connection-shaped failures degrade, because the store really is unreachable
+    and the other half of the architecture should carry the request. Everything else
+    - bad SQL, a missing table, a type error - propagates as a 500. A programming
+    error is not a degraded service.
+    """
+    import socket
+
+    if isinstance(exc, TimeoutError | socket.timeout | socket.gaierror | ConnectionError):
+        return True
+
+    # Matched by class NAME so this module need not import psycopg or redis merely
+    # to classify, and so it keeps working when either is absent.
+    unreachable = {
+        "OperationalError",  # psycopg: connection refused, server closed, timeout
+        "InterfaceError",
+        "PoolTimeout",  # psycopg_pool: no connection free in time
+        "ConnectionError",  # redis
+        "TimeoutError",
+        "BusyLoadingError",
+    }
+    return any(cls.__name__ in unreachable for cls in type(exc).__mro__)
+
+
 # ---------------------------------------------------------------------------
 # Postgres - the batch view. Exact, ACID, complete only up to the watermark.
 # ---------------------------------------------------------------------------
@@ -61,16 +101,55 @@ class PostgresReader:
         self.timeout = timeout if timeout is not None else api.store_timeout_seconds
         self._pool: Any = None
 
-    def _connect(self) -> Any:
-        import psycopg
+    def _get_pool(self) -> Any:
+        """Open the pool on first use, not at import.
 
-        return psycopg.connect(self.dsn, connect_timeout=int(max(self.timeout, 1)))
+        Constructing it in __init__ would make importing this module require a
+        reachable database - so `fleet.serving.app` could not be imported to generate
+        the OpenAPI schema, and the contract tests would need Postgres running.
+
+        Measured on the live stack: a fresh connection per request costs 30-65 ms for
+        a SELECT 1, against 1-2 ms once pooled. That is the whole of the API's
+        latency budget spent on connection setup.
+        """
+        if self._pool is None:
+            from psycopg_pool import ConnectionPool
+
+            self._pool = ConnectionPool(
+                self.dsn,
+                min_size=1,
+                max_size=4,
+                timeout=self.timeout,
+                # Do not block start-up waiting for Postgres. If it is down the API
+                # must still come up and degrade to the speed view, which is the
+                # behaviour the whole serving layer is designed around.
+                open=True,
+                check=ConnectionPool.check_connection,
+            )
+        return self._pool
 
     def _query(self, fn: Any, *args: Any) -> Any:
         try:
-            with self._connect() as conn, conn.cursor() as cur:
+            try:
+                pool = self._get_pool()
+            except ImportError:
+                # psycopg_pool is a separate distribution. Its absence should cost
+                # latency, not availability - so fall back to a direct connection
+                # rather than failing the request.
+                import psycopg
+
+                with (
+                    psycopg.connect(self.dsn, connect_timeout=int(max(self.timeout, 1))) as conn,
+                    conn.cursor() as cur,
+                ):
+                    return fn(cur, *args)
+
+            with pool.connection(timeout=self.timeout) as conn, conn.cursor() as cur:
                 return fn(cur, *args)
         except Exception as exc:
+            if not _is_unreachable(exc):
+                log.error("postgres_query_failed", error=str(exc), error_type=type(exc).__name__)
+                raise
             log.warning("store_unavailable", store="postgres", error=str(exc))
             raise StoreUnavailableError("postgres", exc) from exc
 
@@ -138,6 +217,9 @@ class RedisReader:
         try:
             return fn(self._conn())
         except Exception as exc:
+            if not _is_unreachable(exc):
+                log.error("redis_query_failed", error=str(exc), error_type=type(exc).__name__)
+                raise
             log.warning("store_unavailable", store="redis", error=str(exc))
             self._client = None  # force a reconnect on the next call
             raise StoreUnavailableError("redis", exc) from exc

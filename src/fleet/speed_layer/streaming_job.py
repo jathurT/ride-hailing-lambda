@@ -31,7 +31,7 @@ from fleet.speed_layer.source import QuerySpec, read_telemetry, validated_teleme
 from fleet.store.lake import LakePaths
 from fleet.store.spark_s3 import build_session
 
-ALL_QUERIES = ("master", "dlq", "activity", "earnings", "idle")
+ALL_QUERIES = ("master", "dlq", "activity", "earnings", "idle", "vehicles")
 
 
 def build_specs(bucket: str) -> dict[str, QuerySpec]:
@@ -93,6 +93,8 @@ class SpeedLayer:
             self._start_earnings()
         if "idle" in self.queries:
             self._start_idle()
+        if "vehicles" in self.queries:
+            self._start_vehicle_state()
 
         if not self._started:
             self.log.error("no_queries_started", requested=self.queries)
@@ -234,6 +236,33 @@ class SpeedLayer:
             critical_after_sim_minutes=self.proc.idle_critical_sim_minutes,
         )
 
+    def _start_vehicle_state(self) -> None:
+        """Per-vehicle live state -> Redis. Backs GET /api/v1/vehicles/{id}.
+
+        A separate query rather than another sink on the activity stream, because
+        activity is a windowed AGGREGATE and this needs the raw per-vehicle rows.
+        Attaching a second writeStream to the aggregate would also run the windowing
+        twice - the same trap documented on the idle detector.
+
+        No watermark and no aggregation, so there is no state to bound: each
+        micro-batch simply overwrites the current position of whichever vehicles it
+        contains. That also makes the sink idempotent under micro-batch replay.
+        """
+        from fleet.speed_layer.sinks.redis_sink import (
+            make_vehicle_state_writer,
+            start_foreach_batch,
+        )
+
+        spec = self.specs["vehicles"]
+        q = start_foreach_batch(
+            self._valid_enriched(spec),
+            spec,
+            make_vehicle_state_writer(self.storage.redis_url, self.clock),
+            self.proc.trigger_seconds,
+        )
+        self._started.append(q)
+        self.log.info("query_started", query=spec.name, sink="redis", view="vehicle_state")
+
     def await_termination(self) -> None:
         while self._running and self._started:
             for q in self._started:
@@ -260,7 +289,14 @@ class SpeedLayer:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Speed layer streaming job")
     parser.add_argument(
-        "--queries", default="master,dlq", help=f"comma-separated subset of {','.join(ALL_QUERIES)}"
+        # Every implemented query, which is what the module docstring promises. The
+        # old default of "master,dlq" was a day-4 leftover from when the others did
+        # not exist yet: it meant a fresh `make up` started a pipeline with NO speed
+        # view, so Redis stayed empty and the serving layer's merge had nothing
+        # approximate to serve - a silent half-pipeline that looks like a Redis fault.
+        "--queries",
+        default=",".join(ALL_QUERIES),
+        help=f"comma-separated subset of {','.join(ALL_QUERIES)}",
     )
     args = parser.parse_args(argv)
 

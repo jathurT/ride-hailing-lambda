@@ -154,6 +154,72 @@ def make_earnings_writer(redis_url: str, clock: SimClock) -> Any:
     return write
 
 
+def latest_per_vehicle(rows: list[Any]) -> dict[str, Any]:
+    """Keep only the newest ping per vehicle in this micro-batch.
+
+    A vehicle emits several pings per batch and they arrive in no guaranteed order,
+    so writing them all would leave whichever happened to be written last - which is
+    not the same thing as the most recent. Kafka partitioning by vehicle_id makes
+    per-vehicle ordering likely, not certain, and "likely" is how a live map ends up
+    showing a vehicle at a position it left two minutes ago.
+    """
+    newest: dict[str, Any] = {}
+    for r in rows:
+        vid = r["vehicle_id"]
+        if vid is None:
+            continue
+        current = newest.get(vid)
+        if current is None or r["event_time"] > current["event_time"]:
+            newest[vid] = r
+    return newest
+
+
+def make_vehicle_state_writer(redis_url: str, clock: SimClock) -> Any:
+    """Build the foreachBatch function for per-vehicle live state.
+
+    This backs `GET /api/v1/vehicles/{id}`. `SpeedView.write_vehicle_states` existed
+    from day 3 but was never called by anything, so the endpoint returned 404 for
+    every vehicle in the fleet while looking perfectly healthy - there was no error
+    to see, just an empty keyspace.
+
+    `collect()` is used here on a RAW event stream, which the module docstring warns
+    against. It is bounded in this one case: the batch is reduced to at most
+    FLEET_SIZE rows (150) by `latest_per_vehicle` - but the reduction happens on the
+    driver, so the collect itself is the full micro-batch. At 240 events/second and
+    a 10-second trigger that is ~2,400 rows, which is acceptable; if either the fleet
+    or the event rate grows by an order of magnitude, this should become a
+    `dropDuplicates` + windowed reduction in Spark before the collect.
+    """
+
+    def write(batch_df: DataFrame, batch_id: int) -> None:
+        rows = batch_df.collect()
+        if not rows:
+            return
+
+        newest = latest_per_vehicle(rows)
+        states = [
+            {
+                "vehicle_id": r["vehicle_id"],
+                "status": r["status"],
+                "lat": round(float(r["lat"]), 5) if r["lat"] is not None else "",
+                "lon": round(float(r["lon"]), 5) if r["lon"] is not None else "",
+                "speed_kmh": round(float(r["speed_kmh"]), 1) if r["speed_kmh"] is not None else "",
+                "zone_id": r["zone_id"] or "",
+                "trip_id": r["trip_id"] or "",
+                "driver_id": r["driver_id"] or "",
+                "updated_at_sim": str(r["event_time"]),
+            }
+            for r in newest.values()
+        ]
+
+        view = SpeedView(_redis_client(redis_url), clock)
+        written = view.write_vehicle_states(states)
+        metrics.sink_writes_total.labels(sink="redis_vehicle_state").inc(written)
+        log.info("vehicle_states_written", batch_id=batch_id, vehicles=written)
+
+    return write
+
+
 def start_foreach_batch(
     df: DataFrame, spec: QuerySpec, writer: Any, trigger_seconds: int
 ) -> StreamingQuery:

@@ -48,6 +48,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from fleet.common import metrics
 from fleet.common.logging import get_logger
 from fleet.serving.readers import PostgresReader, RedisReader, StoreUnavailableError
 
@@ -127,11 +128,25 @@ def split_interval(
     else:
         consistency = f"batch-complete-through {hwm.isoformat()}"
 
-    if uncovered:
+    # Uncovered dates have TWO quite different causes and only one of them is a
+    # problem. A date after `sim_today` has simply not happened yet. A date before it
+    # is a real gap: the batch layer has not reached it and the speed view has
+    # already forgotten it. Reporting a future date as "the batch layer is behind"
+    # would send someone looking for a fault that does not exist.
+    future = tuple(d for d in uncovered if d > sim_today)
+    gap = tuple(d for d in uncovered if d <= sim_today)
+
+    if gap:
         consistency += (
-            f"; {len(uncovered)} date(s) in neither view "
-            f"({uncovered[0].isoformat()}..{uncovered[-1].isoformat()}) - "
+            f"; {len(gap)} date(s) in neither view "
+            f"({gap[0].isoformat()}..{gap[-1].isoformat()}) - "
             "the batch layer is behind the simulated clock"
+        )
+    if future:
+        consistency += (
+            f"; {len(future)} requested date(s) are in the future "
+            f"({future[0].isoformat()}..{future[-1].isoformat()}) - "
+            f"the simulation has only reached {sim_today.isoformat()}"
         )
 
     return Interval(
@@ -269,6 +284,19 @@ def merged_utilization(
         consistency += f"; DEGRADED - unreachable: {', '.join(sorted(set(missing)))}"
     if not pg_up:
         consistency += "; watermark unknown while postgres is unreachable"
+
+    # Instrumentation lives here rather than in the endpoint because the merge is
+    # what these numbers describe. `boundary_crossings` staying at zero is the
+    # interesting failure: it means every request landed wholly inside one view and
+    # the reconciliation this project is marked on was never actually exercised.
+    if hwm is not None:
+        metrics.serving_batch_watermark_age_sim_days.set((sim_now.date() - hwm).days)
+    if plan.needs_batch and plan.needs_speed:
+        metrics.serving_merge_boundary_crossings_total.inc()
+    if plan.uncovered:
+        metrics.serving_uncovered_dates_total.inc(len(plan.uncovered))
+    for store in set(missing):
+        metrics.serving_degraded_responses_total.labels(missing_store=store).inc()
 
     log.info(
         "merge_served",

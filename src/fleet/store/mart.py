@@ -291,7 +291,13 @@ SELECT p.vehicle_id, p.sim_date, p.net_profit, p.profit_per_km, p.margin_pct,
   FROM mart.fact_vehicle_daily_pnl p
   JOIN (SELECT MAX(sim_date) AS d FROM mart.fact_vehicle_daily_pnl) latest
     ON p.sim_date = latest.d
- WHERE (%s IS NULL OR p.classification = %s)
+ -- The ::text casts are required, not decorative. psycopg sends an untyped NULL
+ -- for the unfiltered case, and Postgres cannot infer a type for `$1 IS NULL`
+ -- on its own: it raises "could not determine data type of parameter $1".
+ -- Worse, `readers.py` normalises every exception to StoreUnavailableError, so
+ -- this SQL bug surfaced to clients as a 503 "batch view unavailable: postgres"
+ -- while Postgres was perfectly healthy.
+ WHERE (%s::text IS NULL OR p.classification = %s::text)
  ORDER BY p.rolling_7d_avg_profit ASC NULLS LAST, p.net_profit ASC
  LIMIT %s
 """
@@ -339,3 +345,188 @@ def fetch_pipeline_status(cursor: Any) -> dict[str, Any]:
     cursor.execute(FETCH_PIPELINE_STATUS_SQL)
     rows = _rows(cursor)
     return rows[0] if rows else {}
+
+
+# ---------------------------------------------------------------------------
+# Speed/batch reconciliation (plan/07 section 5.4).
+#
+# Lambda's advertised weakness is "reconciling data between two systems". This is
+# where that stops being a discussion point and becomes a number in a table.
+#
+# The orchestrator snapshots the speed view once per simulated day, and later - once
+# the batch layer has computed the same day exactly - the two are compared. The
+# comparison cannot be done retrospectively from Redis, whose TTL is two simulated
+# hours, which is why the snapshot table exists at all.
+#
+# An expected divergence is published in plan/07 section 5.4: 1-3% on active_vehicles
+# (HyperLogLog is ~2%) and up to 8% on earnings (the speed view recognises revenue at
+# trip completion inside a sliding window, the batch layer over the whole day). A
+# delta of EXACTLY zero would not be a triumph - it would be evidence that one side
+# is reading the other rather than computing it independently.
+# ---------------------------------------------------------------------------
+
+SPEED_SNAPSHOT_COLUMNS = (
+    "sim_date",
+    "zone_id",
+    "sim_hour",
+    "captured_at_sim",
+    "window_minutes",
+    "active_vehicles",
+    "trips",
+    "earnings",
+    "idle_ratio",
+    "avg_speed_kmh",
+)
+
+_SNAPSHOT_SET = ",\n            ".join(
+    f"{c} = EXCLUDED.{c}"
+    for c in SPEED_SNAPSHOT_COLUMNS
+    if c not in {"sim_date", "zone_id", "sim_hour"}
+)
+
+UPSERT_SPEED_SNAPSHOT_SQL = f"""
+INSERT INTO mart.speed_view_snapshot ({", ".join(SPEED_SNAPSHOT_COLUMNS)})
+VALUES ({", ".join(["%s"] * len(SPEED_SNAPSHOT_COLUMNS))})
+ON CONFLICT (sim_date, zone_id, sim_hour) DO UPDATE SET
+            {_SNAPSHOT_SET}
+"""
+
+
+def upsert_speed_snapshot(cursor: Any, rows: list[tuple[Any, ...]]) -> int:
+    """Rows must be in SPEED_SNAPSHOT_COLUMNS order.
+
+    Last write per simulated day wins. The alternative - keeping every capture - would
+    need a decision about which one to compare against, and "the speed view's final
+    word on that day" is both defensible and the one a live dashboard would have been
+    showing at the end of it.
+    """
+    cursor.executemany(UPSERT_SPEED_SNAPSHOT_SQL, rows)
+    return len(rows)
+
+
+# WHY THIS NORMALISES INSTEAD OF SUBTRACTING
+#
+# The first version of this query compared the speed view's numbers against the
+# batch view's directly and reported ~99% divergence on every metric. That was not
+# approximation error - it was a unit mismatch. The speed view aggregates a
+# 15-simulated-minute SLIDING window; the batch view aggregates a 1-hour TUMBLING
+# one, rolled up to a day. Comparing them raw compares a quarter of an hour against
+# twenty-four of them, and the answer is arithmetic, not accuracy.
+#
+# So FLOW metrics (trips, earnings) are converted to a per-minute rate on both sides
+# before the comparison: speed / window_minutes against batch_hour / 60. Those are
+# the same quantity in the same units, and the residual difference is the real thing
+# plan/07 section 5.4 is interested in.
+#
+# `active_vehicles` is a LEVEL, not a flow, so a rate makes no sense for it - but the
+# window still matters, because a 15-minute window sees fewer distinct vehicles than
+# an hour does. It is compared raw and labelled `active_vehicles_window_biased` so
+# nobody reads it as a pure HyperLogLog error figure. The bias is one-directional and
+# expected: speed should read LOWER.
+#
+# NULLIF guards every division: a zone with no batch activity in that hour would
+# otherwise raise a division-by-zero and fail the DAG over a quiet 4am hour, which is
+# data, not a fault. The delta comes back NULL and reads as "not comparable".
+RECONCILE_SQL = """
+INSERT INTO mart.reconciliation_delta (sim_date, zone_id, metric, speed_value, batch_value, delta_pct)
+SELECT s.sim_date,
+       s.zone_id,
+       m.metric,
+       ROUND(m.speed_value, 4),
+       ROUND(m.batch_value, 4),
+       ROUND(100.0 * (m.speed_value - m.batch_value) / NULLIF(ABS(m.batch_value), 0), 3)
+  FROM mart.speed_view_snapshot s
+  JOIN mart.fact_zone_hourly b
+    ON b.sim_date = s.sim_date
+   AND b.zone_id  = s.zone_id
+   AND b.sim_hour = s.sim_hour
+ CROSS JOIN LATERAL (VALUES
+        ('trips_per_min',
+         s.trips::numeric    / NULLIF(s.window_minutes, 0),
+         b.trips::numeric    / 60.0),
+        ('earnings_per_min',
+         s.earnings          / NULLIF(s.window_minutes, 0),
+         b.earnings          / 60.0),
+        ('idle_ratio',
+         s.idle_ratio,
+         b.idle_ratio),
+        ('active_vehicles_window_biased',
+         s.active_vehicles::numeric,
+         b.active_vehicles::numeric)
+ ) AS m(metric, speed_value, batch_value)
+ WHERE s.sim_date = %s
+"""
+
+# The same comparison rolled up across all 12 zones, written with zone_id = 'ALL'.
+#
+# This is the one to quote. The per-zone rows above are honest but statistically
+# noisy: a snapshot captures ONE 15-simulated-minute sliding window out of a
+# 1,440-minute day - roughly a 1% sample - and at zone granularity that window
+# contains one or two trips. A zone that happened to see zero trips in the sampled
+# window reports a 100% divergence against an hour that averaged three, which is
+# sampling variance, not a pipeline defect.
+#
+# Summing across zones multiplies the sample by twelve and the variance falls
+# accordingly. The limitation is stated rather than tuned away, because a
+# reconciliation figure that was massaged until it looked good would be worth
+# nothing - and the honest version is still evidence the two paths compute
+# independently, which is what plan/07 section 5.4 is actually asking.
+RECONCILE_FLEET_SQL = """
+INSERT INTO mart.reconciliation_delta (sim_date, zone_id, metric, speed_value, batch_value, delta_pct)
+SELECT agg.sim_date,
+       'ALL',
+       m.metric,
+       ROUND(m.speed_value, 4),
+       ROUND(m.batch_value, 4),
+       ROUND(100.0 * (m.speed_value - m.batch_value) / NULLIF(ABS(m.batch_value), 0), 3)
+  FROM (
+        SELECT s.sim_date,
+               SUM(s.trips)::numeric    / NULLIF(MAX(s.window_minutes), 0) AS speed_trips_pm,
+               SUM(s.earnings)          / NULLIF(MAX(s.window_minutes), 0) AS speed_earn_pm,
+               AVG(s.idle_ratio)                                           AS speed_idle,
+               SUM(b.trips)::numeric    / 60.0                             AS batch_trips_pm,
+               SUM(b.earnings)          / 60.0                             AS batch_earn_pm,
+               AVG(b.idle_ratio)                                           AS batch_idle
+          FROM mart.speed_view_snapshot s
+          JOIN mart.fact_zone_hourly b
+            ON b.sim_date = s.sim_date AND b.zone_id = s.zone_id AND b.sim_hour = s.sim_hour
+         WHERE s.sim_date = %s
+         GROUP BY s.sim_date
+       ) agg
+ CROSS JOIN LATERAL (VALUES
+        ('fleet_trips_per_min',    agg.speed_trips_pm, agg.batch_trips_pm),
+        ('fleet_earnings_per_min', agg.speed_earn_pm,  agg.batch_earn_pm),
+        ('fleet_idle_ratio',       agg.speed_idle,     agg.batch_idle)
+ ) AS m(metric, speed_value, batch_value)
+"""
+
+DELETE_RECONCILE_SQL = "DELETE FROM mart.reconciliation_delta WHERE sim_date = %s"
+
+
+def compute_reconciliation(cursor: Any, sim_date: date) -> int:
+    """Measure speed-vs-batch divergence for one simulated date. Returns rows written.
+
+    Delete-then-insert rather than upsert, because `reconciliation_delta` has a
+    surrogate key and no natural one. That is safe here in a way it is NOT safe for
+    the fact tables: this is a derived measurement that can be recomputed from two
+    surviving sources at any time, so a crash between the delete and the insert loses
+    nothing permanent. The fact tables deliberately avoid the same pattern.
+    """
+    cursor.execute(DELETE_RECONCILE_SQL, (sim_date,))
+    cursor.execute(RECONCILE_SQL, (sim_date,))
+    written = cursor.rowcount
+    cursor.execute(RECONCILE_FLEET_SQL, (sim_date,))
+    return written + cursor.rowcount
+
+
+READ_RECONCILE_SQL = """
+SELECT zone_id, metric, speed_value, batch_value, delta_pct
+  FROM mart.reconciliation_delta
+ WHERE sim_date = %s
+ ORDER BY metric, zone_id
+"""
+
+
+def fetch_reconciliation(cursor: Any, sim_date: date) -> list[dict[str, Any]]:
+    cursor.execute(READ_RECONCILE_SQL, (sim_date,))
+    return _rows(cursor)

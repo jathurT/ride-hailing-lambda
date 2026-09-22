@@ -115,11 +115,26 @@ class SpeedView:
     def push_idle_alert(self, alert_json: str, score: float) -> None:
         """Sorted set scored by simulated time, trimmed to a bounded length.
 
-        Trimming matters: without it the alert feed grows unbounded in a store that
-        has no persistence and a fixed maxmemory.
+        Trimming is what bounds this key: without it the alert feed grows unbounded
+        in a store that has no persistence and a fixed maxmemory.
+
+        NO TTL, deliberately - and this used to have one.
+
+        A Redis TTL applies to the whole KEY, not to individual members. The
+        speed-view TTL is 2 simulated hours, which at a 288x clock is **25 real
+        seconds**, so the entire alert feed vanished 25 seconds after the last push -
+        taking all 200 alerts with it - and reappeared on the next one. Observed
+        live: ZCARD oscillating between 200 and 0 while alerts streamed steadily into
+        `fleet.alerts.v1` the whole time, and the dashboard's alert table was empty
+        as often as not.
+
+        The TTL was there to bound memory, and the trim above already does that
+        exactly - 200 members, permanently. Expiring the key as well bought nothing
+        and cost the feed. Everything else in the speed view keeps its TTL, because
+        those keys are overwritten continuously and a stale one really is garbage;
+        this key is an append-only feed and is the one exception.
         """
         pipe = self.client.pipeline()
         pipe.zadd(keys.IDLE_ALERTS, {alert_json: score})
         pipe.zremrangebyrank(keys.IDLE_ALERTS, 0, -(keys.IDLE_ALERTS_MAX + 1))
-        pipe.expire(keys.IDLE_ALERTS, self.zone_ttl)
         pipe.execute()
