@@ -81,3 +81,75 @@ class TestWriterFieldOwnership:
         m = self.aggregate().as_mapping()
         assert {"active_vehicles", "trips", "idle_ratio", "avg_speed_kmh"} <= set(m)
         assert m["active_vehicles"] == "10"
+
+
+class TestIdleAlertFeedDurability:
+    """The idle-alert feed must survive a gap between alerts.
+
+    It used to carry the speed-view TTL. A Redis TTL applies to the whole KEY, not to
+    individual members, and 2 simulated hours is 25 REAL seconds at a 288x clock - so
+    the entire feed vanished 25 seconds after the last push, taking all 200 alerts
+    with it, then reappeared on the next one. Observed live as ZCARD oscillating
+    between 200 and 0 while alerts streamed steadily into Kafka throughout.
+
+    The trim already bounds the key at 200 members permanently, which is the only
+    thing the TTL was there to do.
+    """
+
+    class _FakePipe:
+        def __init__(self):
+            self.calls = []
+
+        def zadd(self, key, mapping):
+            self.calls.append(("zadd", key, mapping))
+            return self
+
+        def zremrangebyrank(self, key, start, stop):
+            self.calls.append(("zremrangebyrank", key, start, stop))
+            return self
+
+        def expire(self, key, ttl):
+            self.calls.append(("expire", key, ttl))
+            return self
+
+        def execute(self):
+            return []
+
+    class _FakeClient:
+        def __init__(self, pipe):
+            self._pipe = pipe
+
+        def pipeline(self):
+            return self._pipe
+
+    def _view(self, pipe):
+        from datetime import UTC, datetime
+
+        from fleet.common.simclock import SimClock
+        from fleet.store.speed_view import SpeedView
+
+        clock = SimClock(epoch_wall=datetime.now(UTC), epoch_sim=datetime.now(UTC), day_seconds=300)
+        return SpeedView(self._FakeClient(pipe), clock)
+
+    def test_the_feed_is_never_given_an_expiry(self):
+        pipe = self._FakePipe()
+        self._view(pipe).push_idle_alert('{"alert_id":"a1"}', score=1.0)
+        assert not [c for c in pipe.calls if c[0] == "expire"], (
+            "an EXPIRE on the alert ZSET deletes the whole feed, not old members"
+        )
+
+    def test_the_feed_is_still_bounded_by_trimming(self):
+        """Removing the TTL must not remove the memory bound."""
+        from fleet.store import redis_keys as keys
+
+        pipe = self._FakePipe()
+        self._view(pipe).push_idle_alert('{"alert_id":"a1"}', score=1.0)
+        trims = [c for c in pipe.calls if c[0] == "zremrangebyrank"]
+        assert trims, "the feed must still be trimmed or it grows unbounded"
+        assert trims[0][3] == -(keys.IDLE_ALERTS_MAX + 1)
+
+    def test_the_alert_is_scored_so_newest_first_reads_work(self):
+        pipe = self._FakePipe()
+        self._view(pipe).push_idle_alert('{"alert_id":"a1"}', score=12345.0)
+        zadds = [c for c in pipe.calls if c[0] == "zadd"]
+        assert zadds and list(zadds[0][2].values()) == [12345.0]

@@ -287,3 +287,147 @@ class TestSpeedViewAgainstRealRedis:
         sv.write_zone_aggregates([self.agg(trips=5)])
         sv.write_zone_aggregates([self.agg(trips=5)])
         assert client.hget(keys.zone("TESTZ"), "trips") == "5"
+
+
+class TestReadDaosAgainstRealPostgres:
+    """The read side of the mart, exercised against a real server.
+
+    These exist because of a defect that no amount of pure-Python testing would have
+    caught. `fetch_unprofitable` uses a `%s IS NULL OR col = %s` filter so one
+    statement serves both the filtered and unfiltered case. psycopg sends an untyped
+    NULL for the unfiltered call, and Postgres refuses it:
+
+        could not determine data type of parameter $1
+
+    The SQL is only ever parsed by the server, so the bug is invisible until a real
+    connection runs it - and it reached a live stack, where `/api/v1/vehicles/
+    unprofitable` returned 503 "batch view unavailable: postgres" against a database
+    that was healthy and serving every other endpoint.
+
+    The unfiltered call is therefore the important case below, not the filtered one.
+    """
+
+    @pytest.fixture
+    def cur(self):
+        import psycopg
+
+        with psycopg.connect(_pg_dsn(), autocommit=True) as conn, conn.cursor() as c:
+            c.execute("DELETE FROM mart.fact_vehicle_daily_pnl WHERE vehicle_id LIKE 'TEST%'")
+            c.execute("DELETE FROM mart.fact_zone_hourly WHERE zone_id LIKE 'TZ%'")
+            yield c
+            c.execute("DELETE FROM mart.fact_vehicle_daily_pnl WHERE vehicle_id LIKE 'TEST%'")
+            c.execute("DELETE FROM mart.fact_zone_hourly WHERE zone_id LIKE 'TZ%'")
+
+    def _latest_sim_date(self, cur) -> date:
+        """`fetch_unprofitable` reports on the table's most recent simulated day.
+
+        Seeding at a fixed date would make the test pass or fail depending on how far
+        the live simulation had run, which is the kind of flake that gets a real
+        failure ignored. Seeding AT the current maximum keeps the fixture inside the
+        window the query actually looks at.
+        """
+        cur.execute(
+            "SELECT COALESCE(MAX(sim_date), DATE '2026-03-09') FROM mart.fact_vehicle_daily_pnl"
+        )
+        return cur.fetchone()[0]
+
+    def _seed_pnl(self, cur):
+        from fleet.store.mart import PnlRow, upsert_pnl
+
+        seed_date = self._latest_sim_date(cur)
+        upsert_pnl(
+            cur,
+            [
+                PnlRow(
+                    vehicle_id=f"TEST{i:02d}",
+                    sim_date=seed_date,
+                    job_run_id="run-read",
+                    revenue=100.0 + i,
+                    net_profit=float(-50 + i * 10),
+                    rolling_7d_avg_profit=float(-40 + i * 10),
+                    classification="UNPROFITABLE" if i < 2 else "HEALTHY",
+                )
+                for i in range(4)
+            ],
+        )
+
+    def test_unprofitable_without_a_classification_filter(self, cur):
+        """★ The untyped-NULL case. This is the one that failed in production."""
+        from fleet.store.mart import fetch_unprofitable
+
+        self._seed_pnl(cur)
+        # A large limit because the live mart holds 150 real vehicles per day and the
+        # seeded ones need not out-rank them. What is under test is that the query
+        # RUNS with an untyped NULL - it used to raise before reaching any row.
+        rows = fetch_unprofitable(cur, limit=1000, classification=None)
+        assert rows, "the unfiltered query must return rows, not raise"
+        assert {r["vehicle_id"] for r in rows} >= {"TEST00", "TEST01"}
+
+    def test_unprofitable_with_a_classification_filter(self, cur):
+        from fleet.store.mart import fetch_unprofitable
+
+        self._seed_pnl(cur)
+        rows = fetch_unprofitable(cur, limit=1000, classification="UNPROFITABLE")
+        assert rows, "the seeded UNPROFITABLE rows must come back"
+        assert all(r["classification"] == "UNPROFITABLE" for r in rows)
+
+    def test_unprofitable_orders_by_the_rolling_average_not_todays_profit(self, cur):
+        """The business question is which vehicles are BECOMING unprofitable.
+
+        One bad day is noise; sorting on it would rank a vehicle that had a single
+        long deadhead above one that has lost money every day for a week.
+        """
+        from fleet.store.mart import fetch_unprofitable
+
+        self._seed_pnl(cur)
+        rows = fetch_unprofitable(cur, limit=1000, classification=None)
+        rolling = [
+            r["rolling_7d_avg_profit"] for r in rows if r["rolling_7d_avg_profit"] is not None
+        ]
+        assert rolling == sorted(rolling), "must be ascending: worst trend first"
+
+    def test_limit_is_honoured(self, cur):
+        from fleet.store.mart import fetch_unprofitable
+
+        self._seed_pnl(cur)
+        assert len(fetch_unprofitable(cur, limit=2, classification=None)) <= 2
+
+    def test_zone_daily_rolls_hours_up_without_summing_distinct_counts(self, cur):
+        """`active_vehicles` must be MAX across hours, never SUM.
+
+        The hourly figure is already a distinct count, so summing it reports a
+        vehicle working an eight-hour shift as eight vehicles.
+        """
+        from fleet.store.mart import ZoneHourlyRow, fetch_zone_daily, upsert_zone_hourly
+
+        upsert_zone_hourly(
+            cur,
+            [
+                ZoneHourlyRow(
+                    zone_id="TZ1",
+                    sim_date=date(2026, 3, 9),
+                    sim_hour=h,
+                    job_run_id="run-read",
+                    trips=10,
+                    earnings=100.0,
+                    active_vehicles=7,
+                    idle_ratio=0.5,
+                    avg_speed_kmh=30.0,
+                )
+                for h in (0, 1, 2)
+            ],
+        )
+        rows = [
+            r
+            for r in fetch_zone_daily(cur, date(2026, 3, 9), date(2026, 3, 9))
+            if r["zone_id"] == "TZ1"
+        ]
+        assert len(rows) == 1
+        assert int(rows[0]["trips"]) == 30, "flows sum"
+        assert int(rows[0]["active_vehicles"]) == 7, "distinct counts do NOT sum"
+        assert int(rows[0]["hours_reported"]) == 3
+
+    def test_pipeline_status_returns_a_dict_even_with_no_watermark(self, cur):
+        from fleet.store.mart import fetch_pipeline_status
+
+        assert isinstance(fetch_pipeline_status(cur), dict)

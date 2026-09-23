@@ -183,3 +183,23 @@ def test_gap_is_named_in_the_consistency_string():
 def test_inverted_range_is_rejected_loudly():
     with pytest.raises(ValueError, match="precedes"):
         split_interval(D(2026, 3, 4), D(2026, 3, 8), D(2026, 3, 2), D(2026, 3, 8))
+
+
+def test_a_future_date_is_not_reported_as_the_batch_layer_lagging():
+    """Two causes of an uncovered date, only one of which is a fault.
+
+    A date after the simulated clock has simply not happened yet. Describing it as
+    "the batch layer is behind" sends someone looking for a problem that does not
+    exist - and during a live demo that is the worst possible false alarm.
+    """
+    iv = split_interval(D(2026, 3, 4), D(2026, 3, 2), D(2026, 3, 6), D(2026, 3, 5))
+    assert set(iv.uncovered) == {D(2026, 3, 6)}
+    assert "in the future" in iv.consistency
+    assert "behind the simulated clock" not in iv.consistency
+    assert "only reached 2026-03-05" in iv.consistency
+
+
+def test_a_real_gap_and_a_future_date_are_reported_separately():
+    iv = split_interval(D(2026, 3, 2), D(2026, 3, 1), D(2026, 3, 8), D(2026, 3, 5))
+    assert "behind the simulated clock" in iv.consistency, "3-03..3-05 is a genuine gap"
+    assert "in the future" in iv.consistency, "3-06..3-08 has not happened yet"
