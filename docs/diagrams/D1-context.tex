@@ -1,0 +1,46 @@
+% D1 - System context. Who the system serves, and what crosses its boundary.
+%
+% Deliberately the only diagram with no technology on it: the point of a context
+% diagram is that a reader who knows nothing about Kafka can still see what the
+% system is for and who depends on it.
+\documentclass[border=8pt]{standalone}
+\input{fleetstyle}
+\begin{document}
+\begin{tikzpicture}[node distance=9mm]
+
+\node[box, draw=servorange, fill=servbg, minimum width=44mm, minimum height=20mm,
+      font=\small\bfseries] (sys)
+  {Fleet Operations\\Data Platform};
+\node[font=\tiny\itshape, text=edgegrey, below=0.5mm of sys.north, anchor=north]
+  {Lambda architecture};
+
+% ---------------------------------------------------------------- actors in
+\node[ext, left=26mm of sys, yshift=14mm, minimum width=30mm] (drivers)
+  {\textbf{Vehicle fleet}\\[1pt]\tiny 150 vehicles emitting GPS,\\\tiny status and fare
+   every few seconds};
+\node[ext, left=26mm of sys, yshift=-14mm, minimum width=30mm] (partners)
+  {\textbf{Fuel \& garage partners}\\[1pt]\tiny one expense file per day:\\\tiny fuel,
+   maintenance, distance};
+
+% ---------------------------------------------------------------- actors out
+\node[ext, right=26mm of sys, yshift=14mm, minimum width=30mm] (dispatch)
+  {\textbf{Dispatch operations}\\[1pt]\tiny needs it NOW:\\\tiny where are the vehicles,
+   which are idle};
+\node[ext, right=26mm of sys, yshift=-14mm, minimum width=30mm] (finance)
+  {\textbf{Finance}\\[1pt]\tiny needs it RIGHT:\\\tiny which vehicles are becoming
+   unprofitable};
+
+% ---------------------------------------------------------------- edges
+\draw[flow] (drivers.east)  -- node[lbl, above, sloped] {telemetry, continuous} (sys.north west);
+\draw[flow] (partners.east) -- node[lbl, below, sloped] {expenses, once a day} (sys.south west);
+\draw[flow] (sys.north east) -- node[lbl, above, sloped] {live utilization, alerts} (dispatch.west);
+\draw[flow] (sys.south east) -- node[lbl, below, sloped] {daily reconciliation} (finance.west);
+
+% ---------------------------------------------------------------- the tension
+\node[font=\tiny\itshape, text=edgegrey, align=center, below=13mm of sys]
+  {The two consumers want different things from the same data: dispatch trades accuracy
+   for latency,\\ finance trades latency for accuracy. That tension is the whole reason
+   the architecture has two paths.};
+
+\end{tikzpicture}
+\end{document}

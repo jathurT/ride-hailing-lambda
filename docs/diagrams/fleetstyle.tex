@@ -1,0 +1,49 @@
+% Shared styling for every report diagram.
+%
+% One colour convention across all four, stated in the legend on D2:
+%   BLUE   speed path    - the approximate, low-latency half
+%   GREEN  batch path    - the exact, recomputed half
+%   GREY   infrastructure- stores and brokers that belong to neither path
+%   ORANGE serving       - where the two are reconciled
+%
+% TikZ rather than draw.io: the report is LaTeX, so these compile as vector art with
+% no external asset pipeline, the source is version-controlled beside the code, and
+% fonts match the body text exactly. A diagram that can be regenerated from source is
+% also a diagram that cannot silently drift from the system it describes.
+
+\usepackage{tikz}
+\usepackage{xcolor}
+\usetikzlibrary{positioning,arrows.meta,fit,backgrounds,calc,shapes.geometric}
+
+\definecolor{speedblue}{HTML}{1F6FB2}
+\definecolor{speedbg}{HTML}{E3F0FA}
+\definecolor{batchgreen}{HTML}{2E7D4A}
+\definecolor{batchbg}{HTML}{E4F3E8}
+\definecolor{servorange}{HTML}{C2660A}
+\definecolor{servbg}{HTML}{FCEDDD}
+\definecolor{infragrey}{HTML}{5A6672}
+\definecolor{infrabg}{HTML}{ECEFF1}
+\definecolor{edgegrey}{HTML}{444C54}
+
+\tikzset{
+  box/.style={
+    draw, rounded corners=2pt, align=center, inner sep=5pt,
+    font=\scriptsize, minimum height=8mm, line width=0.5pt,
+  },
+  speed/.style ={box, draw=speedblue,  fill=speedbg,  text=black},
+  batch/.style ={box, draw=batchgreen, fill=batchbg,  text=black},
+  serv/.style  ={box, draw=servorange, fill=servbg,   text=black},
+  infra/.style ={box, draw=infragrey,  fill=infrabg,  text=black},
+  ext/.style   ={box, draw=edgegrey, fill=white, dashed, text=black},
+  flow/.style  ={-{Stealth[length=4pt]}, draw=edgegrey, line width=0.5pt},
+  speedflow/.style={flow, draw=speedblue},
+  batchflow/.style={flow, draw=batchgreen},
+  lbl/.style   ={font=\tiny\itshape, text=edgegrey, inner sep=1.5pt},
+  zone/.style  ={draw=edgegrey, dashed, rounded corners=3pt, line width=0.4pt,
+                 inner sep=7pt},
+  % fill=white matters: these labels sit ON the dashed zone border, and without
+  % an opaque background the border line runs straight through the text and
+  % reads as a strike-through.
+  ztitle/.style={font=\scriptsize\bfseries, text=edgegrey, fill=white,
+                 inner xsep=3pt, inner ysep=1pt},
+}
