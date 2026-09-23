@@ -171,3 +171,35 @@ CREATE TABLE IF NOT EXISTS mart.restatement_log (
     processed_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     triggered_run TEXT
 );
+
+-- ------------------------------------------- speed-view snapshots (day 8)
+--
+-- The reconciliation in plan/07 section 5.4 compares what the SPEED view said about
+-- a simulated date against what the BATCH layer later computed for it. That
+-- comparison is impossible from Redis after the fact: the speed view is a current
+-- window with a 2-simulated-hour TTL, so by the time the batch layer has processed a
+-- day, the speed view has long forgotten it.
+--
+-- So the orchestrator snapshots the speed view on every run - once per simulated day
+-- - and the delta is computed later against the snapshot. Without this table the
+-- divergence figure could only be asserted, not measured.
+CREATE TABLE IF NOT EXISTS mart.speed_view_snapshot (
+    sim_date        DATE NOT NULL,
+    zone_id         TEXT NOT NULL,
+    captured_at_sim TIMESTAMPTZ NOT NULL,
+    -- The hour the capture falls in, and the width of the window the speed layer
+    -- was reporting over. BOTH are required to reconcile at all: the speed view
+    -- aggregates a 15-simulated-minute SLIDING window, the batch view a 1-hour
+    -- TUMBLING one. Comparing the two raw numbers compares a quarter-hour against a
+    -- whole day and yields a ~99% "divergence" that says nothing about accuracy.
+    -- Storing the window makes both sides normalisable to a per-minute rate.
+    sim_hour        SMALLINT CHECK (sim_hour BETWEEN 0 AND 23),
+    window_minutes  SMALLINT,
+    active_vehicles INT,
+    trips           INT,
+    earnings        NUMERIC(12,2),
+    idle_ratio      NUMERIC(5,4),
+    avg_speed_kmh   NUMERIC(6,2),
+    PRIMARY KEY (sim_date, zone_id, sim_hour)
+);
+CREATE INDEX IF NOT EXISTS ix_speed_snapshot_date ON mart.speed_view_snapshot (sim_date);

@@ -11,7 +11,7 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir \
       "fastapi>=0.111" "uvicorn[standard]>=0.30" \
-      "redis>=5.0" "psycopg[binary]>=3.1" \
+      "redis>=5.0" "psycopg[binary]>=3.1" "psycopg-pool>=3.2" \
       "pydantic>=2.7" "pydantic-settings>=2.3" \
       "structlog>=24.1" "prometheus-client>=0.20" \
       "prometheus-fastapi-instrumentator>=7.0"

@@ -22,6 +22,7 @@ api      = [
     "uvicorn[standard]>=0.30",
     "redis>=5.0",
     "psycopg[binary]>=3.1",
+    "psycopg-pool>=3.2",
     # Route-level request/latency metrics for free, so the SERVE column of the
     # Grafana pipeline-health dashboard is real data rather than a placeholder.
     "prometheus-fastapi-instrumentator>=7.0",

@@ -41,6 +41,7 @@ from fleet.common.logging import configure, get_logger
 from fleet.store.lake import LakePaths
 from fleet.store.mart import ZoneHourlyRow, upsert_zone_hourly
 from fleet.store.spark_s3 import build_session
+from fleet.transforms.enrich import with_zone, zone_table
 from fleet.transforms.utilization import zone_hourly_exact
 
 log = get_logger()
@@ -56,10 +57,23 @@ def run(sim_date: date, job_run_id: str) -> int:
 
     try:
         events = read_telemetry(spark, paths, sim_date)
+
+        # The master dataset stores RAW validated events - `zone_id` is not in it.
+        # Zone is derived from lat/lon at read time, by the SAME `with_zone` the speed
+        # layer calls in `_valid_enriched`. That is the "one codebase, two entry
+        # points" claim being true rather than asserted: identical enrichment,
+        # identical zone boundaries, one place to change them.
+        #
+        # Deriving zone at query time rather than storing it is also what makes the
+        # master dataset re-interpretable: if the zone grid is ever redrawn, every
+        # historical day can be recomputed under the new boundaries. A zone_id baked
+        # into Parquet would freeze the old grid into the raw data for ever.
+        enriched = with_zone(events, zone_table(spark))
+
         # 12 zones x 24 hours is 288 rows at most. Collecting through the driver is
         # the same call made and justified in `daily_profitability`: the upsert needs
         # ON CONFLICT, which Spark's JDBC writer cannot express.
-        computed = zone_hourly_exact(events).collect()
+        computed = zone_hourly_exact(enriched).collect()
 
         rows = [
             ZoneHourlyRow(
