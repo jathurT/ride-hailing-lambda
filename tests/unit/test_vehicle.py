@@ -73,14 +73,25 @@ class TestInvariants:
             v.advance_to(START + PING * i)
             assert 0.0 <= v.speed_kmh <= 90.0
 
-    def test_position_stays_in_city_bounds(self):
-        from fleet.common.zones import LAT_MAX, LAT_MIN, LON_MAX, LON_MIN
+    def test_whole_fleet_stays_inside_the_city_the_validator_enforces(self):
+        """Every real position must pass the stream's bounds check.
 
-        v = make()
-        for i in range(2000):
-            v.advance_to(START + PING * i)
-            assert LAT_MIN - 0.01 <= v.lat <= LAT_MAX + 0.01
-            assert LON_MIN - 0.01 <= v.lon <= LON_MAX + 0.01
+        The first version of this test checked one vehicle and allowed 0.01 degrees
+        (about 1.1 km) outside the box, so it passed while the live stack
+        dead-lettered real events as COORDINATES_OUT_OF_BOUNDS: 176 of them in the
+        first few minutes of the rerun, all near the city edge, and the lake (which
+        keeps only valid events) lost those trips too.
+        """
+        from fleet.common.zones import in_city_bounds
+        from fleet.ingestion.generators.fleet import build_fleet
+
+        fleet = build_fleet(150, 42, START)
+        outside = 0
+        for i in range(480):  # one simulated day of 3-minute pings
+            for v in fleet:
+                v.advance_to(START + PING * i)
+                outside += not in_city_bounds(v.lat, v.lon)
+        assert outside == 0, f"{outside} real positions fall outside the city bounds"
 
 
 class TestDeterminism:

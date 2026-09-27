@@ -355,7 +355,7 @@ class Vehicle:
     # -- helpers -----------------------------------------------------------
 
     def _jittered(self, lat: float, lon: float) -> tuple[float, float]:
-        return (
+        return _inside_city(
             lat + self.rng.gauss(0, GPS_JITTER_DEG),
             lon + self.rng.gauss(0, GPS_JITTER_DEG),
         )
@@ -370,7 +370,7 @@ class Vehicle:
         """
         zone = self.current_zone() or BY_ID[self.home_zone_id]
         spread = 0.004 / max(zone.demand_weight, 0.3)
-        return (
+        return _inside_city(
             self.lat + self.rng.gauss(0, spread),
             self.lon + self.rng.gauss(0, spread),
         )
@@ -396,3 +396,21 @@ class Vehicle:
             self.day_deadhead_km = 0.0
             self.day_revenue = 0.0
             self.day_trips = 0
+
+
+def _inside_city(lat: float, lon: float) -> tuple[float, float]:
+    """Keep a real position inside the box the stream validator accepts.
+
+    The random offsets above were not bounded. Near the edge, and in the outskirts
+    where the pickup spread is widest, vehicles wandered out of the city, and every
+    later ping was dead-lettered as COORDINATES_OUT_OF_BOUNDS: real trips lost from
+    both the speed view and the lake. Only the defect injector may put a vehicle
+    outside the city.
+    """
+    from fleet.common.zones import LAT_MAX, LAT_MIN, LON_MAX, LON_MIN
+
+    margin = 1e-5  # the upper bounds are exclusive
+    return (
+        min(max(lat, LAT_MIN), LAT_MAX - margin),
+        min(max(lon, LON_MIN), LON_MAX - margin),
+    )
