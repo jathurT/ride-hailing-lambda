@@ -289,6 +289,7 @@ class TestSpeedViewAgainstRealRedis:
         assert client.hget(keys.zone("TESTZ"), "trips") == "5"
 
 
+@pg
 class TestReadDaosAgainstRealPostgres:
     """The read side of the mart, exercised against a real server.
 
