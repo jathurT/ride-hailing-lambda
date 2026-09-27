@@ -42,7 +42,7 @@ up-obs: ## ~9.9 G  + Prometheus / Grafana / Alertmanager
 	@$(MAKE) --no-print-directory wait
 
 .PHONY: up-full
-up-full: ## ~12.4 G + Jaeger / OTel + Spark cluster (screenshots only - see plan/14 day 11)
+up-full: ## Same as up-obs today (tracing was not implemented - see README)
 	COMPOSE_PROFILES=full $(COMPOSE) up -d --build
 	@$(MAKE) --no-print-directory wait
 
@@ -265,7 +265,7 @@ simclock: ## Show the current simulated time
 ##@ Quality
 
 .PHONY: test
-test: ## Unit tests (no docker needed)
+test: ## Full suite. Pure tests need no docker; store-backed ones skip without it
 	.venv/bin/pytest tests/unit -v
 
 .PHONY: lint
