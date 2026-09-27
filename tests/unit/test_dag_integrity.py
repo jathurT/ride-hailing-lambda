@@ -111,6 +111,26 @@ def test_snapshot_happens_before_validation(dagbag):
     assert "validate_expense_file" in dag.get_task("snapshot_speed_view").downstream_task_ids
 
 
+def test_a_skipped_snapshot_does_not_skip_the_batch(dagbag):
+    """The snapshot skips when the speed view is down or has no zones yet. That costs
+    the reconciliation figure for the day, not the P&L.
+
+    Observed live on a clean run before the fix: the first simulated day's snapshot
+    skipped ("speed view reported no zones"), the default trigger rule on the branch
+    passed the skip down the whole batch path, and verify_watermark_advanced failed.
+    The day never got a P&L.
+    """
+    from airflow.utils.trigger_rule import TriggerRule
+
+    dag = dagbag.dags[DAG_ID]
+    branch = dag.get_task("validate_expense_file")
+    assert "snapshot_speed_view" in branch.upstream_task_ids
+    assert branch.trigger_rule == TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS
+    # With resolve_sim_date upstream too, a skipped date (no complete day yet) still
+    # leaves the branch with no success, so it skips instead of running on nothing.
+    assert "resolve_sim_date" in branch.upstream_task_ids
+
+
 def test_there_is_no_separate_watermark_task(dagbag):
     """ADR-005: the watermark moves inside the fact upsert's transaction.
 

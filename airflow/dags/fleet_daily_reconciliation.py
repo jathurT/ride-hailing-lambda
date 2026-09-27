@@ -179,7 +179,12 @@ def fleet_daily_reconciliation() -> None:
             conn.commit()
         return n
 
-    @task.branch
+    # NONE_FAILED_MIN_ONE_SUCCESS, not the default. The snapshot may SKIP (the speed
+    # view is down, or has no zones yet right after start-up), and that skip must not
+    # stop the P&L. Under ALL_SUCCESS it cascaded through the whole batch path, then
+    # verify_watermark_advanced failed: seen live on the first simulated day of a clean
+    # run. When resolve_sim_date itself skips there is no success, so this still skips.
+    @task.branch(trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS)
     def validate_expense_file(sim_date: str) -> str:
         """Structural checks only - is this file usable at all.
 
