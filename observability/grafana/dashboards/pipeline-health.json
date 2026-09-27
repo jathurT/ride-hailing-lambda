@@ -56,7 +56,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(events_produced_total{status=\"ok\"}[1m]))",
+          "expr": "(sum(rate(events_produced_total{status=\"ok\"}[1m]))) or on() vector(0)",
           "instant": true,
           "datasource": {
             "type": "prometheus",

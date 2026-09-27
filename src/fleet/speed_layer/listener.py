@@ -138,7 +138,15 @@ def build_listener() -> Any:
     from pyspark.sql.streaming import StreamingQueryListener
 
     class _PushListener(StreamingQueryListener):  # type: ignore[misc]
+        def __init__(self) -> None:
+            super().__init__()
+            # Spark's idle event carries the query id but no name, so the name is
+            # remembered here when the query starts.
+            self._names: dict[str, str] = {}
+
         def onQueryStarted(self, event: Any) -> None:  # noqa: N802 - Spark's interface
+            if event.name:
+                self._names[str(event.id)] = event.name
             log.info("query_started", query=event.name, query_id=str(event.id))
 
         def onQueryProgress(self, event: Any) -> None:  # noqa: N802 - Spark's interface
@@ -157,11 +165,18 @@ def build_listener() -> Any:
             It still counts as liveness, so the timestamp is refreshed. Without this
             an idle query would look stalled after 120 seconds and fire a false
             critical alert in the middle of a demo.
+
+            The event has no name, only the id. Reading `event.name` pushed every
+            idle heartbeat under "unnamed": the real queries never got them, and the
+            "unnamed" series went stale two minutes after data resumed and raised a
+            StreamingQueryStalled that nothing inhibited. Seen live after a producer
+            outage.
             """
+            name = self._names.get(str(event.id)) or getattr(event, "name", None) or "unnamed"
             metrics.push_gauges(
                 PUSH_JOB,
                 {"spark_streaming_last_progress_timestamp": time.time()},
-                grouping={"query": getattr(event, "name", None) or "unnamed"},
+                grouping={"query": name},
             )
 
         def onQueryTerminated(self, event: Any) -> None:  # noqa: N802 - Spark's interface

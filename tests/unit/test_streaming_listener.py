@@ -117,3 +117,22 @@ def test_watermark_lag_returns_none_rather_than_guessing():
     assert _watermark_lag(None, "2026-03-08T14:00:00Z") is None
     assert _watermark_lag("2026-03-08T14:00:00Z", None) is None
     assert _watermark_lag("garbage", "2026-03-08T14:00:00Z") is None
+
+
+def test_an_idle_query_refreshes_its_own_liveness_not_an_unnamed_one(monkeypatch):
+    """Spark 3.5's idle event has the query id but no name. Before the fix every idle
+    heartbeat was pushed as query="unnamed", so the real query still looked stalled
+    and a phantom "unnamed" series raised a false alert once data resumed."""
+    import pytest
+
+    pytest.importorskip("pyspark")
+    from fleet.speed_layer import listener as mod
+
+    pushed = []
+    monkeypatch.setattr(
+        mod.metrics, "push_gauges", lambda job, g, grouping: pushed.append(grouping)
+    )
+    lst = mod.build_listener()
+    lst.onQueryStarted(SimpleNamespace(id="id-1", runId="r-1", name="q_dlq", timestamp="t"))
+    lst.onQueryIdle(SimpleNamespace(id="id-1", runId="r-1", timestamp="t"))
+    assert pushed == [{"query": "q_dlq"}]
