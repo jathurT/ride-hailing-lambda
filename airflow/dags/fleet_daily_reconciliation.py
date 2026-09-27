@@ -1,6 +1,7 @@
 """fleet_daily_reconciliation - the batch layer, orchestrated.
 
-Runs every 5 real minutes, which at SIM_DAY_SECONDS=300 is once per simulated day.
+Checks every real minute and batches each simulated day once, as soon as it is
+complete (a simulated day is 5 real minutes at SIM_DAY_SECONDS=300).
 
     resolve_sim_date
           |
@@ -65,7 +66,14 @@ DEFAULT_ARGS = {
 @dag(
     dag_id="fleet_daily_reconciliation",
     description="Batch layer for one simulated day: zone rollup, P&L, reconciliation",
-    schedule="*/5 * * * *",  # one simulated day at SIM_DAY_SECONDS=300
+    # Every minute, not every 5. The simulated midnight falls at whatever offset the
+    # stack started at, so a 5-minute cron can start just BEFORE it and batch the day
+    # before yesterday. Seen live: the watermark sat two days behind the clock for ~96%
+    # of every simulated day, and because the speed view only holds the last two
+    # simulated hours, "yesterday" was answered by neither view. resolve_sim_date
+    # skips the run when the latest complete day is already batched, so the batch
+    # still runs once per simulated day, about a minute after it ends.
+    schedule="* * * * *",
     start_date=pendulum.datetime(2026, 1, 1, tz="UTC"),
     catchup=False,  # a missed simulated day is gone; the lake partition is what it is
     max_active_runs=1,  # two runs would race on the same upsert and watermark
@@ -91,6 +99,10 @@ def fleet_daily_reconciliation() -> None:
         if override:
             return str(override)
 
+        import psycopg
+
+        from fleet.store.mart import read_high_water_mark
+
         clock = read_anchor(Path(config.sim().state_path))
         latest_complete = clock.sim_date() - pendulum.duration(days=1)
         if latest_complete < clock.epoch_sim.date():
@@ -98,6 +110,10 @@ def fleet_daily_reconciliation() -> None:
                 "no complete simulated day yet - the stack has been up for less than "
                 "one SIM_DAY_SECONDS"
             )
+        with psycopg.connect(config.storage().postgres_dsn) as conn, conn.cursor() as cur:
+            hwm = read_high_water_mark(cur)
+        if hwm is not None and hwm >= latest_complete:
+            raise AirflowSkipException(f"{latest_complete} is already batched (watermark {hwm})")
         return latest_complete.isoformat()
 
     @task

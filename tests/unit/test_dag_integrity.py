@@ -60,9 +60,16 @@ def test_the_dag_is_present(dagbag):
     assert DAG_ID in dagbag.dags
 
 
-def test_schedule_is_one_simulated_day(dagbag):
-    """5 real minutes at SIM_DAY_SECONDS=300. If either changes, so must the other."""
-    assert dagbag.dags[DAG_ID].schedule_interval == "*/5 * * * *"
+def test_schedule_checks_every_minute(dagbag):
+    """Every minute, so a simulated day (5 real minutes) is batched about a minute after
+    it ends, whatever offset the simulated midnight has against the wall clock.
+
+    With the old 5-minute cron the run could start just before the simulated midnight
+    and batch the day before yesterday; the watermark then sat two days behind the
+    clock for most of every day. resolve_sim_date skips a day already batched, so the
+    batch itself still runs once per simulated day.
+    """
+    assert dagbag.dags[DAG_ID].schedule_interval == "* * * * *"
 
 
 def test_catchup_is_off_and_runs_are_serialised(dagbag):
