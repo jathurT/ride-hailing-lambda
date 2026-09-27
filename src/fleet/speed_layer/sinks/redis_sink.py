@@ -52,6 +52,28 @@ def newest_window_per_zone(rows: list[Any]) -> dict[str, Any]:
     return newest
 
 
+def _survives_redis_outage(sink: str, write: Any) -> Any:
+    """Skip a micro-batch while Redis is down instead of killing the query.
+
+    An exception in `foreachBatch` terminates the streaming query, and the job then
+    stops every query and the container restarts, in a loop, until Redis is back.
+    Seen live: stopping Redis stopped the lake writes too, and the live view stayed
+    empty for a minute after Redis returned while Spark started up again. The live
+    view is disposable and every batch overwrites it, so a skipped batch loses
+    nothing: the first batch after Redis returns writes the current figures.
+    """
+    import redis
+
+    def guarded(batch_df: DataFrame, batch_id: int) -> None:
+        try:
+            write(batch_df, batch_id)
+        except redis.RedisError as exc:
+            metrics.sink_write_errors_total.labels(sink=sink).inc()
+            log.warning("speed_view_write_skipped", sink=sink, batch_id=batch_id, error=str(exc))
+
+    return guarded
+
+
 def _redis_client(url: str) -> Any:
     """Built inside the executor/driver call, not captured from the enclosing scope.
 
@@ -103,7 +125,7 @@ def make_activity_writer(redis_url: str, clock: SimClock) -> Any:
         metrics.sink_writes_total.labels(sink="redis_activity").inc(len(aggregates))
         log.info("speed_view_written", batch_id=batch_id, zones=len(aggregates))
 
-    return write
+    return _survives_redis_outage("redis_activity", write)
 
 
 def make_earnings_writer(redis_url: str, clock: SimClock) -> Any:
@@ -151,7 +173,7 @@ def make_earnings_writer(redis_url: str, clock: SimClock) -> Any:
             total=round(sum(float(r["earnings"] or 0) for r in newest.values()), 2),
         )
 
-    return write
+    return _survives_redis_outage("redis_earnings", write)
 
 
 def latest_per_vehicle(rows: list[Any]) -> dict[str, Any]:
@@ -217,7 +239,7 @@ def make_vehicle_state_writer(redis_url: str, clock: SimClock) -> Any:
         metrics.sink_writes_total.labels(sink="redis_vehicle_state").inc(written)
         log.info("vehicle_states_written", batch_id=batch_id, vehicles=written)
 
-    return write
+    return _survives_redis_outage("redis_vehicle_state", write)
 
 
 def start_foreach_batch(

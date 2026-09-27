@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from fleet.speed_layer.sinks.redis_sink import newest_window_per_zone
 
 
@@ -153,3 +155,78 @@ class TestIdleAlertFeedDurability:
         self._view(pipe).push_idle_alert('{"alert_id":"a1"}', score=12345.0)
         zadds = [c for c in pipe.calls if c[0] == "zadd"]
         assert zadds and list(zadds[0][2].values()) == [12345.0]
+
+
+class TestARedisOutageDoesNotStopTheSpeedLayer:
+    """An exception in foreachBatch terminates the query; the job then stops every
+    query and restarts, in a loop, until Redis is back. Seen live: stopping Redis
+    stopped the lake writes too. The writers now skip the batch and count the error.
+    """
+
+    UNREACHABLE = "redis://127.0.0.1:1/0"  # nothing listens on port 1
+
+    class _Batch:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def collect(self):
+            return self._rows
+
+        def isEmpty(self):
+            return not self._rows
+
+    @staticmethod
+    def _clock():
+        from datetime import UTC, datetime
+
+        from fleet.common.simclock import SimClock
+
+        return SimClock(
+            epoch_wall=datetime(2026, 9, 27, tzinfo=UTC),
+            epoch_sim=datetime(2026, 3, 1, tzinfo=UTC),
+            day_seconds=300,
+        )
+
+    @staticmethod
+    def _errors(sink):
+        from fleet.common import metrics
+
+        return metrics.sink_write_errors_total.labels(sink=sink)._value.get()
+
+    def test_the_zone_writer_skips_the_batch_and_counts_it(self):
+        pytest.importorskip("pyspark")
+        from fleet.speed_layer.sinks.redis_sink import make_activity_writer
+
+        row = {
+            "zone_id": "Z01",
+            "active_vehicles": 3,
+            "trips": 1,
+            "idle_ratio": 0.5,
+            "avg_speed_kmh": 20.0,
+            "window_start": "2026-03-01 10:00:00",
+            "window_end": "2026-03-01 10:15:00",
+        }
+        before = self._errors("redis_activity")
+        make_activity_writer(self.UNREACHABLE, self._clock())(self._Batch([row]), 7)
+        assert self._errors("redis_activity") == before + 1
+
+    def test_the_vehicle_writer_skips_the_batch_and_counts_it(self):
+        pytest.importorskip("pyspark")
+        from datetime import datetime
+
+        from fleet.speed_layer.sinks.redis_sink import make_vehicle_state_writer
+
+        row = {
+            "vehicle_id": "V001",
+            "status": "idle",
+            "lat": 6.9,
+            "lon": 79.86,
+            "speed_kmh": 0.0,
+            "zone_id": "Z01",
+            "trip_id": None,
+            "driver_id": "D001",
+            "event_time": datetime(2026, 3, 1, 10),
+        }
+        before = self._errors("redis_vehicle_state")
+        make_vehicle_state_writer(self.UNREACHABLE, self._clock())(self._Batch([row]), 7)
+        assert self._errors("redis_vehicle_state") == before + 1

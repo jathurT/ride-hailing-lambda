@@ -93,7 +93,7 @@ def make_alert_writer(schema_id: int, redis_url: str, clock: SimClock) -> Any:
                 .option("topic", k.alerts_topic)
                 .save()
             )
-            _mirror_to_redis(batch_df, batch_id, redis_url, clock)
+            _mirror_to_redis_or_skip(batch_df, batch_id, redis_url, clock)
         finally:
             batch_df.unpersist()
 
@@ -111,6 +111,23 @@ def start_alert_query(
         .trigger(processingTime=f"{trigger_seconds} seconds")
         .start()
     )
+
+
+def _mirror_to_redis_or_skip(
+    batch_df: DataFrame, batch_id: int, redis_url: str, clock: SimClock
+) -> None:
+    """The alerts are already in Kafka, the record; the Redis copy is disposable.
+
+    Letting a Redis error escape would terminate the idle query, and the replay
+    after the restart would publish this batch's alerts to Kafka a second time.
+    """
+    import redis
+
+    try:
+        _mirror_to_redis(batch_df, batch_id, redis_url, clock)
+    except redis.RedisError as exc:
+        metrics.sink_write_errors_total.labels(sink="redis_alerts").inc()
+        log.warning("alert_mirror_skipped", batch_id=batch_id, error=str(exc))
 
 
 def _mirror_to_redis(batch_df: DataFrame, batch_id: int, redis_url: str, clock: SimClock) -> None:
