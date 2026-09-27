@@ -50,6 +50,21 @@ def sim_now_column(clock: SimClock) -> Column:
     )
 
 
+def sim_time_of(real: Column, clock: SimClock) -> Column:
+    """The simulated instant matching a REAL timestamp column, such as `ingest_time`.
+
+    The validator compares an event's time with the moment it was sent, not with
+    the micro-batch clock: Spark fixes `current_timestamp()` once per micro-batch, so
+    against the batch clock an event looks as much newer or older as the batch is
+    early or late. Measured live, honest events sit within one simulated minute of
+    their own send time, and the injected clock skew sits exactly 120 minutes ahead.
+    """
+    elapsed_real = real.cast("double") - F.lit(clock.epoch_wall.timestamp())
+    return F.timestamp_seconds(
+        F.lit(clock.epoch_sim.timestamp()) + elapsed_real * F.lit(clock.speedup)
+    )
+
+
 def sim_now_literal(sim_now: datetime) -> Column:
     """A fixed simulated instant. Correct for batch jobs and deterministic tests."""
     return F.lit(sim_now).cast("timestamp")

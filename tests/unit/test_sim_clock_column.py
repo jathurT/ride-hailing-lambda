@@ -59,7 +59,8 @@ def event_at(sim_time: datetime, **over):
         "status": "on_trip",
         "fare": 120.0,
         "event_time": sim_time,
-        "ingest_time": sim_time,
+        # ingest_time is REAL wall time in the live topic; "sent just now".
+        "ingest_time": datetime.now(UTC),
     }
     base.update(over)
     return tuple(base[c.split()[0]] for c in TELEMETRY_SCHEMA.split(", "))
@@ -157,6 +158,28 @@ class TestValidatorAgainstALiveClock:
         far_future = clock.sim_now() + timedelta(hours=2)
         out = validate_telemetry(self.frame(spark, [event_at(far_future)]), clock).collect()[0]
         assert not out["is_valid"]
+        assert out["rejection_reason"] == "FUTURE_TIMESTAMP"
+
+    def test_an_honest_event_is_valid_however_far_behind_the_batch_clock_is(self, spark):
+        """Spark fixes a micro-batch's clock before it fetches the records, so the
+        batch clock can be behind the data. Here it is two simulated hours behind the
+        event; the event was sent just now and is honest. The old check (batch clock
+        plus a tolerance) rejected it."""
+        clock = clock_started_ago(60)
+        # Sent 25 real seconds (two simulated hours) after the batch clock was fixed.
+        sent = datetime.now(UTC) + timedelta(seconds=25)
+        event = event_at(clock.sim_now(sent), ingest_time=sent)
+        out = validate_telemetry(self.frame(spark, [event]), clock).collect()[0]
+        assert out["is_valid"], out["rejection_reason"]
+
+    def test_injected_skew_is_caught_however_late_the_processing_is(self, spark):
+        """The injected fault puts event_time two hours after the send time. If the
+        stream processes it late enough, the batch clock has caught up and the old
+        check let it through: 15 of 480 on a clean run."""
+        clock = clock_started_ago(3600)  # the stream is an hour of real time on
+        sent = clock.epoch_wall + timedelta(seconds=10)  # sent long ago
+        skewed = event_at(clock.sim_now(sent) + timedelta(hours=2), ingest_time=sent)
+        out = validate_telemetry(self.frame(spark, [skewed]), clock).collect()[0]
         assert out["rejection_reason"] == "FUTURE_TIMESTAMP"
 
     def test_a_fixed_datetime_is_still_supported_for_batch(self, spark):

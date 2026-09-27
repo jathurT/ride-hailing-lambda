@@ -97,13 +97,6 @@ class TestValidation:
     def test_idle_event_with_null_trip_and_fare_is_valid(self, spark):
         assert self.validated(spark, status="idle", trip_id=None, fare=None)["is_valid"]
 
-    def test_micro_batch_scheduling_jitter_is_not_the_future(self, spark):
-        """Spark stamps a micro-batch's time before it fetches the batch's Kafka
-        offsets, so an event can look up to about 11 real seconds (about 54
-        simulated minutes) newer than "now". With a 5-minute tolerance the rerun
-        dead-lettered 98 real events as FUTURE_TIMESTAMP."""
-        assert self.validated(spark, event_time=SIM_NOW + timedelta(minutes=55))["is_valid"]
-
     def test_the_tolerance_still_catches_the_injected_clock_skew(self):
         """The injected defect is two hours ahead; the tolerance must stay below it."""
         from fleet.transforms.validate import FUTURE_TOLERANCE_SIM_MINUTES

@@ -25,15 +25,17 @@ from pyspark.sql import functions as F
 
 from fleet.common.simclock import SimClock
 from fleet.common.zones import LAT_MAX, LAT_MIN, LON_MAX, LON_MIN
-from fleet.transforms.clock import as_sim_now_column
+from fleet.transforms.clock import as_sim_now_column, sim_now_column, sim_time_of
 
 MAX_PLAUSIBLE_SPEED_KMH = 200.0
-# 60 simulated minutes is 12.5 real seconds at 288x. Spark stamps a micro-batch's
-# time before it fetches the batch's Kafka offsets, so under load an event can look
-# up to about 11 real seconds newer than "now". The first value, 5 minutes (about
-# one real second), dead-lettered 98 real events on the rerun. The injected
-# clock-skew defect is 120 simulated minutes ahead, so it is still caught.
-FUTURE_TOLERANCE_SIM_MINUTES = 60
+# In a stream the reference is the event's own send time (`ingest_time`, converted to
+# simulated time), not the micro-batch clock. The batch clock is fixed when Spark
+# plans the batch, so it is early or late by however far processing is behind:
+# early, it dead-lettered 98 honest events on a rerun; late (the tolerance raised to
+# 60 to cover that), it let 15 of 480 injected skews through as valid. Honest events
+# sit within one simulated minute of their send time, the injected skew 120 minutes
+# ahead, so 5 minutes separates them whatever the processing lag.
+FUTURE_TOLERANCE_SIM_MINUTES = 5
 
 # Checked in order; the first match wins, so the reported reason is the most
 # specific one that applies rather than whichever happened to be evaluated last.
@@ -54,18 +56,21 @@ def validate_telemetry(df: DataFrame, sim_now: datetime | SimClock | Column) -> 
     Args:
         df: decoded telemetry with the v1 schema's columns.
         sim_now: the simulated "now" to compare event times against. Pass a
-            **SimClock** in a streaming job so the reference advances with the
-            stream; pass a **datetime** in a batch job or a test where a fixed
-            reference is what you want. Passing a fixed datetime to a long-running
-            stream rejects everything - see `fleet.transforms.clock`.
+            **SimClock** in a streaming job: each event is then judged against its
+            own send time (`ingest_time` in simulated time), which does not depend
+            on how far behind the stream is. Pass a **datetime** in a batch job or a
+            test where a fixed reference is what you want. Passing a fixed datetime
+            to a long-running stream rejects everything - see `fleet.transforms.clock`.
 
     Nothing is dropped here. The caller splits on `is_valid` and routes the
     remainder to the dead-letter queue, so every rejection stays countable and
     traceable (plan/04 §6).
     """
-    future_cutoff = as_sim_now_column(sim_now) + F.expr(
-        f"INTERVAL {FUTURE_TOLERANCE_SIM_MINUTES} MINUTES"
-    )
+    if isinstance(sim_now, SimClock):
+        reference = F.coalesce(sim_time_of(F.col("ingest_time"), sim_now), sim_now_column(sim_now))
+    else:
+        reference = as_sim_now_column(sim_now)
+    future_cutoff = reference + F.expr(f"INTERVAL {FUTURE_TOLERANCE_SIM_MINUTES} MINUTES")
 
     reason = (
         F.when(F.col("lat").isNull() | F.col("lon").isNull(), F.lit("NULL_COORDINATES"))
