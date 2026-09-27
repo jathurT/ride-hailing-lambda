@@ -1,7 +1,7 @@
 {
   "uid": "fleet-batch-reconciliation",
   "title": "Fleet \u00b7 Batch Reconciliation (daily)",
-  "description": "The daily half of the business question \u2014 which vehicles are becoming unprofitable once yesterday's fuel and maintenance costs are factored in \u2014 plus the state of the batch/speed boundary that answer depends on.",
+  "description": "The daily half of the business question, which vehicles are becoming unprofitable once yesterday's fuel and maintenance costs are factored in, plus the state of the batch/speed boundary that answer depends on.",
   "tags": [
     "fleet",
     "lambda",
@@ -21,7 +21,7 @@
     {
       "id": 1,
       "type": "row",
-      "title": "Which vehicles are becoming unprofitable \u2014 the daily half of the question",
+      "title": "Which vehicles are becoming unprofitable: the daily half of the question",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -105,7 +105,7 @@
           ]
         }
       ],
-      "description": "\u2605 The direct answer to the assignment's business question. Ordered by the 7-DAY ROLLING AVERAGE, not by today's profit: the question asks which vehicles are BECOMING unprofitable, and one bad day is noise \u2014 sorting on it would rank a vehicle that had a single long deadhead above one that has lost money every day for a week. Exact figures from the batch view, computed over the immutable master dataset.",
+      "description": "\u2605 The direct answer to the assignment's business question. Ordered by the 7-DAY ROLLING AVERAGE, not by today's profit: the question asks which vehicles are BECOMING unprofitable, and one bad day is noise, sorting on it would rank a vehicle that had a single long deadhead above one that has lost money every day for a week. Exact figures from the batch view, computed over the immutable master dataset.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -154,7 +154,7 @@
           "range": false
         }
       ],
-      "description": "Simulated days between the batch high-water mark and now. 1 is healthy \u2014 yesterday is complete. Climbing means the batch layer has stopped, and that failure has NO other symptom: the speed layer keeps serving, the API keeps answering, and the dashboard stays green while more and more of every query is answered approximately.",
+      "description": "Simulated days between the batch high-water mark and now. 1 is healthy, yesterday is complete. Climbing means the batch layer has stopped, and that failure has NO other symptom: the speed layer keeps serving, the API keeps answering, and the dashboard stays green while more and more of every query is answered approximately.",
       "fieldConfig": {
         "defaults": {
           "thresholds": {
@@ -224,6 +224,7 @@
             "data": ""
           },
           "root_selector": "",
+          "parser": "backend",
           "columns": [
             {
               "selector": "pnl_rows",
@@ -235,7 +236,20 @@
       ],
       "description": "Per-vehicle daily P&L rows in mart.fact_vehicle_daily_pnl. Should be exactly (simulated days processed) x (fleet size). A count that is not a clean multiple of the fleet size means a day was partially processed.",
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
         "overrides": []
       },
       "options": {
@@ -281,6 +295,7 @@
             "data": ""
           },
           "root_selector": "",
+          "parser": "backend",
           "columns": [
             {
               "selector": "restated_rows",
@@ -290,9 +305,22 @@
           ]
         }
       ],
-      "description": "Rows whose value changed after first publication \u2014 a figure an auditor asks about. Re-running the batch layer with the SAME job_run_id leaves this at zero, which is how idempotency is demonstrated; a restatement run with a new id increments it deliberately.",
+      "description": "Rows whose value changed after first publication, a figure an auditor asks about. Re-running the batch layer with the SAME job_run_id leaves this at zero, which is how idempotency is demonstrated; a restatement run with a new id increments it deliberately.",
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
         "overrides": []
       },
       "options": {
@@ -335,7 +363,7 @@
           "range": false
         }
       ],
-      "description": "Requests whose date range spanned the batch/speed boundary, so BOTH views contributed. This is the reconciliation actually happening. A flat zero means every request landed wholly inside one view and the merge \u2014 the thing this architecture is justified by \u2014 was never exercised.",
+      "description": "Requests whose date range spanned the batch/speed boundary, so BOTH views contributed. This is the reconciliation actually happening. A flat zero means every request landed wholly inside one view and the merge, the thing this architecture is justified by, was never exercised.",
       "fieldConfig": {
         "defaults": {
           "thresholds": {
@@ -374,7 +402,7 @@
     {
       "id": 8,
       "type": "row",
-      "title": "Speed view vs batch view \u2014 Lambda's stated weakness, measured",
+      "title": "Speed view vs batch view: Lambda's stated weakness, measured",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -405,13 +433,13 @@
             "type": "prometheus",
             "uid": "fleet-prom"
           },
-          "expr": "sum by (missing_store) (rate(serving_degraded_responses_total[5m]))",
+          "expr": "sum by (missing_store) (rate(serving_degraded_responses_total[5m])) or on() label_replace(vector(0), \"missing_store\", \"none\", \"\", \"\")",
           "legendFormat": "{{missing_store}}",
           "instant": false,
           "range": true
         }
       ],
-      "description": "Serving partial data with X-Data-Degraded is CORRECT behaviour, so this is not an error counter. A rate sustained above zero means one store is unreachable and the answer is coming from half the architecture \u2014 exact figures gone if it is Postgres, the live view gone if it is Redis.",
+      "description": "Serving partial data with X-Data-Degraded is CORRECT behaviour, so this is not an error counter. A rate sustained above zero means one store is unreachable and the answer is coming from half the architecture, exact figures gone if it is Postgres, the live view gone if it is Redis.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -447,7 +475,7 @@
             "type": "prometheus",
             "uid": "fleet-prom"
           },
-          "expr": "rate(serving_uncovered_dates_total[5m])",
+          "expr": "sum(rate(serving_uncovered_dates_total[5m])) or on() vector(0)",
           "legendFormat": "dates neither view could answer",
           "instant": false,
           "range": true

@@ -1,7 +1,7 @@
 {
   "uid": "fleet-operations",
   "title": "Fleet \u00b7 Operations (live)",
-  "description": "The live half of the business question \u2014 fleet utilization and earnings by area, right now. Every panel is served through the project's own FastAPI serving layer via the Infinity datasource, so the dashboard exercises the merge rather than bypassing it (plan/07 \u00a76).",
+  "description": "The live half of the business question, fleet utilization and earnings by area, right now. Every panel is served through the project's own FastAPI serving layer via the Infinity datasource, so the dashboard exercises the merge rather than bypassing it (plan/07 \u00a76).",
   "tags": [
     "fleet",
     "lambda",
@@ -20,7 +20,7 @@
     {
       "id": 1,
       "type": "row",
-      "title": "Right now \u2014 from the speed view, via /api/v1/fleet/live",
+      "title": "Right now: from the speed view, via /api/v1/fleet/live",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -69,9 +69,22 @@
           ]
         }
       ],
-      "description": "Distinct vehicles seen in the current 15-simulated-minute window. A HyperLogLog estimate (~2% error) \u2014 the speed layer trades exactness for a bounded state store, which is the Lambda speed-layer contract.",
+      "description": "Distinct vehicles seen in the current 15-simulated-minute window. A HyperLogLog estimate (~2% error), the speed layer trades exactness for a bounded state store, which is the Lambda speed-layer contract.",
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
         "overrides": []
       },
       "options": {
@@ -128,7 +141,20 @@
       ],
       "description": "Trips active in the current window, not trips completed today.",
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
         "overrides": []
       },
       "options": {
@@ -185,7 +211,20 @@
       ],
       "description": "Share of pings in the window whose status was idle. This is the only figure here that is independent of window width, which makes it the one worth comparing against the batch layer.",
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
         "overrides": []
       },
       "options": {
@@ -240,9 +279,22 @@
           ]
         }
       ],
-      "description": "Zones that wrote to Redis in the last window. Below 12 means a zone has gone quiet \u2014 or that the activity query has fallen behind.",
+      "description": "Zones that wrote to Redis in the last window. Below 12 means a zone has gone quiet, or that the activity query has fallen behind.",
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
         "overrides": []
       },
       "options": {
@@ -261,7 +313,7 @@
     {
       "id": 6,
       "type": "row",
-      "title": "By area \u2014 the 'utilization and earnings by area' half of the question",
+      "title": "By area: the 'utilization and earnings by area' half of the question",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -315,7 +367,7 @@
           ]
         }
       ],
-      "description": "Live earnings per zone from the speed view. Revenue is recognised at TRIP COMPLETION, so a zone with long trips in progress reads low until they finish \u2014 the figure lags by up to one trip duration by design, and the batch layer is what corrects it.",
+      "description": "Live earnings per zone from the speed view. Revenue is recognised at TRIP COMPLETION, so a zone with long trips in progress reads low until they finish, the figure lags by up to one trip duration by design, and the batch layer is what corrects it.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -404,7 +456,7 @@
     {
       "id": 9,
       "type": "row",
-      "title": "Idle alerts \u2014 the threshold-based alerting the brief asks for",
+      "title": "Idle alerts: the threshold-based alerting the brief asks for",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -473,7 +525,7 @@
           ]
         }
       ],
-      "description": "Produced by the stateful streaming detector (Q3) and published to fleet.alerts.v1. These are BUSINESS alerts \u2014 about vehicles \u2014 and are deliberately separate from the pipeline-health alerts in Alertmanager, which are about the system. Conflating the two is how an on-call rota learns to ignore its own alerts. Thresholds: 45 simulated minutes warning, 90 critical.",
+      "description": "Produced by the stateful streaming detector (Q3) and published to fleet.alerts.v1. These are BUSINESS alerts, about vehicles, and are deliberately separate from the pipeline-health alerts in Alertmanager, which are about the system. Conflating the two is how an on-call rota learns to ignore its own alerts. Thresholds: 45 simulated minutes warning, 90 critical.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []

@@ -1,7 +1,7 @@
 {
   "uid": "fleet-pipeline-health",
   "title": "Fleet \u00b7 Pipeline Health",
-  "description": "End-to-end health of the Lambda pipeline, one column per stage: INGEST, PROCESS, STORE, SERVE. Provisioned from observability/grafana/dashboards/ \u2014 edits made here are lost on container restart; change the file.",
+  "description": "End-to-end health of the Lambda pipeline, one column per stage: INGEST, PROCESS, STORE, SERVE. Provisioned from observability/grafana/dashboards/, edits made here are lost on container restart; change the file.",
   "tags": [
     "fleet",
     "lambda",
@@ -29,7 +29,7 @@
     {
       "id": 1,
       "type": "row",
-      "title": "At a glance \u2014 one number per stage",
+      "title": "At a glance: one number per stage",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -167,7 +167,7 @@
           "values": false
         }
       },
-      "description": "\u2605 THE liveness signal for the speed layer. Consumer lag cannot measure these queries \u2014 they checkpoint their own offsets and never commit to a group, so lag reads zero whether they are keeping up or dead. A query that stops emits no progress, so the AGE of this timestamp is the only thing that separates 'idle' from 'died an hour ago'."
+      "description": "\u2605 THE liveness signal for the speed layer. Consumer lag cannot measure these queries, they checkpoint their own offsets and never commit to a group, so lag reads zero whether they are keeping up or dead. A query that stops emits no progress, so the AGE of this timestamp is the only thing that separates 'idle' from 'died an hour ago'."
     },
     {
       "id": 4,
@@ -186,7 +186,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(sink_write_errors_total[5m]))",
+          "expr": "sum(rate(sink_write_errors_total[5m])) or on() vector(0)",
           "instant": true,
           "datasource": {
             "type": "prometheus",
@@ -300,7 +300,7 @@
     {
       "id": 6,
       "type": "row",
-      "title": "INGEST \u2014 the simulated sources",
+      "title": "INGEST: the simulated sources",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -459,7 +459,7 @@
           "sort": "desc"
         }
       },
-      "description": "Backpressure is deliberate \u2014 the producer blocks rather than dropping telemetry. Resyncs rising means the host cannot sustain the event rate: a capacity signal, not a correctness one. This condition used to crash the producer, and Docker's restart policy hid it behind healthy throughput."
+      "description": "Backpressure is deliberate, the producer blocks rather than dropping telemetry. Resyncs rising means the host cannot sustain the event rate: a capacity signal, not a correctness one. This condition used to crash the producer, and Docker's restart policy hid it behind healthy throughput."
     },
     {
       "id": 9,
@@ -524,7 +524,7 @@
     {
       "id": 10,
       "type": "timeseries",
-      "title": "Simulated clock \u2014 day index and drift",
+      "title": "Simulated clock: day index and drift",
       "datasource": {
         "type": "prometheus",
         "uid": "fleet-prom"
@@ -594,7 +594,7 @@
     {
       "id": 11,
       "type": "row",
-      "title": "PROCESS \u2014 Spark Structured Streaming (pushed, not scraped)",
+      "title": "PROCESS: Spark Structured Streaming (pushed, not scraped)",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -673,7 +673,7 @@
           "sort": "desc"
         }
       },
-      "description": "Input persistently above processed means the query is falling behind. Both at zero is NOT necessarily bad \u2014 check the progress-age panel, which is the real liveness signal."
+      "description": "Input persistently above processed means the query is falling behind. Both at zero is NOT necessarily bad, check the progress-age panel, which is the real liveness signal."
     },
     {
       "id": 13,
@@ -794,7 +794,7 @@
           "sort": "desc"
         }
       },
-      "description": "Stateful queries only \u2014 dedup and idle detection. Monotonic growth is the classic watermark bug: state that is never evicted eventually takes the driver out of memory."
+      "description": "Stateful queries only, dedup and idle detection. Monotonic growth is the classic watermark bug: state that is never evicted eventually takes the driver out of memory."
     },
     {
       "id": 15,
@@ -860,7 +860,7 @@
     {
       "id": 16,
       "type": "row",
-      "title": "STORE \u2014 sinks, lake, mart and alerts",
+      "title": "STORE: sinks, lake, mart and alerts",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -929,7 +929,7 @@
           "sort": "desc"
         }
       },
-      "description": "Per-sink write throughput. The redis sink stopping while the parquet sink continues means the speed view is frozen but the master dataset is fine \u2014 a partial failure the API will report as degraded."
+      "description": "Per-sink write throughput. The redis sink stopping while the parquet sink continues means the speed view is frozen but the master dataset is fine, a partial failure the API will report as degraded."
     },
     {
       "id": 18,
@@ -948,7 +948,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (sink) (rate(sink_write_errors_total[5m]))",
+          "expr": "sum by (sink) (rate(sink_write_errors_total[5m])) or on() label_replace(vector(0), \"sink\", \"none\", \"\", \"\")",
           "legendFormat": "{{sink}}",
           "range": true,
           "datasource": {
@@ -1091,7 +1091,8 @@
           },
           "color": {
             "mode": "palette-classic"
-          }
+          },
+          "noValue": "Not measurable here: Structured Streaming keeps offsets in its checkpoint and commits none to a consumer group"
         },
         "overrides": []
       },
@@ -1109,12 +1110,12 @@
           "sort": "desc"
         }
       },
-      "description": "Real consumer groups only. This does NOT measure the Spark queries \u2014 they never commit offsets to a group, so their lag reads zero whether healthy or dead. Forcing kafka.group.id to make this work killed the DLQ query after ~4,500 micro-batches."
+      "description": "Real consumer groups only. This does NOT measure the Spark queries, they never commit offsets to a group, so their lag reads zero whether healthy or dead. Forcing kafka.group.id to make this work killed the DLQ query after ~4,500 micro-batches."
     },
     {
       "id": 21,
       "type": "row",
-      "title": "SERVE \u2014 the API, and the merge actually happening",
+      "title": "SERVE: the API, and the merge actually happening",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1254,7 +1255,7 @@
           "sort": "desc"
         }
       },
-      "description": "p95 rising while p50 stays flat is one slow store, not a slow API \u2014 usually the batch half hitting Postgres without an index."
+      "description": "p95 rising while p50 stays flat is one slow store, not a slow API, usually the batch half hitting Postgres without an index."
     },
     {
       "id": 24,
@@ -1283,7 +1284,7 @@
         },
         {
           "refId": "B",
-          "expr": "rate(serving_uncovered_dates_total[5m])",
+          "expr": "sum(rate(serving_uncovered_dates_total[5m])) or on() vector(0)",
           "legendFormat": "uncovered dates",
           "range": true,
           "datasource": {
@@ -1324,7 +1325,7 @@
           "sort": "desc"
         }
       },
-      "description": "\u2605 The reconciliation, happening. A flat ZERO here means every request landed wholly inside one view and the merge \u2014 the thing this project is marked on \u2014 was never exercised. Uncovered dates rising means the batch layer has fallen more than one simulated day behind."
+      "description": "\u2605 The reconciliation, happening. A flat ZERO here means every request landed wholly inside one view and the merge, the thing this project is marked on, was never exercised. Uncovered dates rising means the batch layer has fallen more than one simulated day behind."
     },
     {
       "id": 25,
@@ -1343,7 +1344,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (missing_store) (rate(serving_degraded_responses_total[5m]))",
+          "expr": "sum by (missing_store) (rate(serving_degraded_responses_total[5m])) or on() label_replace(vector(0), \"missing_store\", \"none\", \"\", \"\")",
           "legendFormat": "{{missing_store}}",
           "range": true,
           "datasource": {
