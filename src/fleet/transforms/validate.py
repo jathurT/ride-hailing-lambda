@@ -28,7 +28,12 @@ from fleet.common.zones import LAT_MAX, LAT_MIN, LON_MAX, LON_MIN
 from fleet.transforms.clock import as_sim_now_column
 
 MAX_PLAUSIBLE_SPEED_KMH = 200.0
-FUTURE_TOLERANCE_SIM_MINUTES = 5
+# 60 simulated minutes is 12.5 real seconds at 288x. Spark stamps a micro-batch's
+# time before it fetches the batch's Kafka offsets, so under load an event can look
+# up to about 11 real seconds newer than "now". The first value, 5 minutes (about
+# one real second), dead-lettered 98 real events on the rerun. The injected
+# clock-skew defect is 120 simulated minutes ahead, so it is still caught.
+FUTURE_TOLERANCE_SIM_MINUTES = 60
 
 # Checked in order; the first match wins, so the reported reason is the most
 # specific one that applies rather than whichever happened to be evaluated last.
