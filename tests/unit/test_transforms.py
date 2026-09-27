@@ -233,6 +233,53 @@ class TestRevenueTrap:
         assert sum(r["completed_trips"] for r in out) == 2
 
 
+class TestTripDedupStateIsBounded:
+    """The streaming dedup must forget old trips once the watermark passes them.
+
+    Before the fix `dropDuplicates(["trip_id"])` never evicted anything (the key has
+    no event-time column), so the speed layer's earnings query kept every trip since
+    start-up in its state store.
+    """
+
+    def test_old_trips_are_evicted_from_state(self, spark, tmp_path):
+        src = tmp_path / "in"
+        src.mkdir()
+
+        def drop_file(name, rows):
+            frame(spark, rows).write.parquet((src / name).as_uri())
+
+        schema = frame(spark, [event()]).schema
+        stream = spark.readStream.schema(schema).option("recursiveFileLookup", "true")
+        deduped = deduplicate_trips(stream.parquet(src.as_uri()), "30 minutes")
+        query = (
+            deduped.writeStream.format("memory")
+            .queryName(f"dedup_{tmp_path.name}")
+            .outputMode("append")
+            .start()
+        )
+        try:
+            old = [event(event_id=f"o{i}", trip_id=f"OLD{i}") for i in range(10)]
+            drop_file("a", old)
+            query.processAllAvailable()
+            later = SIM_NOW + timedelta(hours=5)
+            drop_file("b", [event(event_id="n1", trip_id="NEW1", event_time=later)])
+            query.processAllAvailable()
+            drop_file("c", [event(event_id="n2", trip_id="NEW2", event_time=later)])
+            query.processAllAvailable()
+            state = query.lastProgress["stateOperators"][0]["numRowsTotal"]
+        finally:
+            query.stop()
+        assert state <= 2, f"{state} trips still held in state; the old ten were never evicted"
+
+    def test_a_trip_longer_than_the_pipeline_watermark_is_still_one_trip(self, spark):
+        """Trips run up to 50 simulated minutes, beyond the 30 minute watermark."""
+        rows = [
+            event(event_id=f"t{m}", event_time=SIM_NOW + timedelta(minutes=m))
+            for m in range(0, 51, 3)
+        ]
+        assert deduplicate_trips(frame(spark, rows), "30 minutes").count() == 1
+
+
 class TestZoneActivity:
     def test_counts_distinct_vehicles_not_pings(self, spark):
         rows = [

@@ -50,14 +50,39 @@ def deduplicate_trips(df: DataFrame, watermark_sim: str) -> DataFrame:
     Since `fare` is constant across a trip's on-trip pings, any surviving row gives
     the correct value.
 
-    The watermark bounds the dedup state; without it it grows for the lifetime of
-    the stream.
+    `dropDuplicatesWithinWatermark`, not `dropDuplicates`. The plain version only
+    evicts state when the event-time column is part of the key, and here the key is
+    `trip_id` alone, so the watermark bounded nothing: the state store held every
+    trip since start-up. Seen live on the pipeline-health dashboard as the one query
+    whose state rows only ever went up (25,000 after 40 minutes).
+
+    Spark only guarantees a duplicate is dropped if it is within the delay of the
+    first row, so the delay is at least TRIP_DEDUP_MIN_SIM_MINUTES, longer than the
+    longest simulated trip. With the 30 minute pipeline watermark a long trip's later
+    pings could be counted a second time.
+
+    A static DataFrame has no state to bound (and Spark refuses the watermark
+    variant on one), so it takes the plain dedup, with the same result.
     """
-    return (
-        df.filter(F.col("trip_id").isNotNull() & F.col("fare").isNotNull())
-        .withWatermark("event_time", watermark_sim)
-        .dropDuplicates(["trip_id"])
+    priced = df.filter(F.col("trip_id").isNotNull() & F.col("fare").isNotNull())
+    if not df.isStreaming:
+        return priced.dropDuplicates(["trip_id"])
+    delay = max(_minutes(watermark_sim), TRIP_DEDUP_MIN_SIM_MINUTES)
+    return priced.withWatermark("event_time", f"{delay} minutes").dropDuplicatesWithinWatermark(
+        ["trip_id"]
     )
+
+
+# Longer than the longest simulated trip (50 minutes, generators/vehicle.py).
+TRIP_DEDUP_MIN_SIM_MINUTES = 60
+
+
+def _minutes(delay: str) -> int:
+    """'30 minutes' -> 30. The pipeline states every delay in simulated minutes."""
+    value, unit = delay.split()
+    if not unit.startswith("minute"):
+        raise ValueError(f"expected a delay in minutes, got {delay!r}")
+    return int(value)
 
 
 def zone_activity(
