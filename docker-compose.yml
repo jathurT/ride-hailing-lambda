@@ -90,9 +90,15 @@ services:
   # --- storage layers -----------------------------------------------------
 
   minio:
-    image: minio/minio:RELEASE.2024-06-13T22-53-53Z
+    # Bitnami's archive, not minio/minio. The official repository has been removed
+    # from Docker Hub (and its quay.io tags with it), so the pinned
+    # minio/minio:RELEASE.2024-06-13T22-53-53Z fails with "pull access denied".
+    # This image carries the SAME MinIO build (2024-06-13T22-53-53Z, commit 20960b6),
+    # so behaviour is unchanged. Three differences follow from the Bitnami layout:
+    # its own run.sh starts the server (API :9000, console :9001), data lives in
+    # /bitnami/minio/data, and `mc` is not on PATH - hence the absolute path below.
+    image: bitnamilegacy/minio:2024.6.13
     container_name: fleet-minio
-    command: server /data --console-address ":9001"
     ports:
       - "9000:9000"
       - "9001:9001"      # console: browse the master dataset and the reports
@@ -100,9 +106,9 @@ services:
       MINIO_ROOT_USER: ${STORE_MINIO_ACCESS_KEY:-fleetadmin}
       MINIO_ROOT_PASSWORD: ${STORE_MINIO_SECRET_KEY:-fleetadmin}
     volumes:
-      - minio-data:/data
+      - minio-data:/bitnami/minio/data
     healthcheck:
-      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      test: ["CMD-SHELL", "/opt/bitnami/minio-client/bin/mc ready local || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
