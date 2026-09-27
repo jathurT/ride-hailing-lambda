@@ -15,3 +15,11 @@ reports/*.html
 .venv/
 state/sim_epoch.json
 landing/
+
+# LaTeX build files (the report PDF itself is tracked)
+docs/report/*.aux
+docs/report/*.fdb_latexmk
+docs/report/*.fls
+docs/report/*.log
+docs/report/*.out
+docs/report/*.toc

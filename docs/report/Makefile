@@ -4,10 +4,10 @@
 #   make clean    -> remove LaTeX build artefacts (keeps the PDF)
 #
 # Figures come from two generators, both re-runnable from the repo root:
-#   make diagrams   TikZ sources in docs/diagrams -> vector PDFs
+#   make diagrams   draw.io sources in docs/diagrams -> vector PDFs
 #   make figures    headless Chromium over the running stack -> PNGs
 
-main.pdf: main.tex $(wildcard figures/*)
+main.pdf: main.tex measurements.tex $(wildcard figures/*)
 	latexmk -pdf -interaction=nonstopmode main.tex
 	@echo "  pages: $$(pdfinfo main.pdf | awk '/^Pages/{print $$2}')"
 

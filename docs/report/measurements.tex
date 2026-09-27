@@ -1,0 +1,64 @@
+% Measured in the final clean run on 27 September 2026 (stack started 17:51 UTC).
+% Every value and how it was measured: docs/evidence/rerun-measurements.md.
+\newcommand{\mAlertFirst}{76 s}
+\newcommand{\mAlertNoData}{181 s}
+\newcommand{\mAlertResolved}{19 s}
+\newcommand{\mAlertVerdict}{met}
+\newcommand{\mAlertsShown}{only ProducerTargetDown, with NoTelemetryIngested inhibited as a consequence}
+\newcommand{\mApiLatency}{6 / 18 / 29 ms}
+\newcommand{\mBatchDay}{53 to 56 s}
+\newcommand{\mDagRun}{91 s and 105 s}
+\newcommand{\mDays}{5}
+\newcommand{\mDegradeRows}{%
+Both stores up & 200 & 36 batch, 12 speed rows, not degraded \\ \hline
+Redis stopped & 200 & 36 batch rows, \texttt{X-Data-Degraded: true}, Redis named as missing \\ \hline
+Both stopped & 503 & names both stores; never a 500 \\ \hline
+PostgreSQL stopped & 200 & 12 speed rows, \texttt{X-Data-Degraded: true}, PostgreSQL named as missing; high-water mark reported as unknown \\ \hline
+Both restarted & 200 & 36 batch, 12 speed rows, not degraded \\ \hline}
+\newcommand{\mDlqNote}{Three of the five types match exactly. Negative fare differs by 1. Timestamp two hours ahead differs by 1. The injected counts were read about a second before the producer stopped, so a fault sent in that second is dead-lettered but not in the snapshot.}
+\newcommand{\mDlqRows}{%
+Missing coordinates & 1{,}415 & 1{,}415 \\ \hline
+Position outside the city & 922 & 922 \\ \hline
+Negative fare & 974 & 975 \\ \hline
+Impossible speed & 907 & 907 \\ \hline
+Timestamp two hours ahead & 474 & 475 \\ \hline
+\textbf{Total} & \textbf{4{,}692} & \textbf{4{,}694} \\ \hline}
+\newcommand{\mFreshPfifty}{9.1}
+\newcommand{\mFreshPninetyfive}{23.2}
+\newcommand{\mFreshVerdict}{met}
+\newcommand{\mHwm}{2026-03-04}
+\newcommand{\mHwmHealthy}{81 of 113 (72\,\%)}
+\newcommand{\mMemory}{4.8 GiB}
+\newcommand{\mMergeBatchRows}{36}
+\newcommand{\mMergeFrom}{2026-03-02}
+\newcommand{\mMergeRows}{48}
+\newcommand{\mMergeSpeedRows}{12}
+\newcommand{\mMergeTo}{2026-03-05}
+\newcommand{\mMicroBatchNote}{At the 95th percentile \texttt{q\_idle} takes longer than the 10 second trigger, so its next batch starts late. It is the stateful idle detector, the heaviest query. The other five stay inside the trigger. On average the speed layer keeps up; at the tail the stateful query does not, which is the main reason freshness at p95 is well above p50.}
+\newcommand{\mMicroBatchRows}{%
+\texttt{q\_master} & 1.5 & 3.4 \\ \hline
+\texttt{q\_dlq} & 0.6 & 3.2 \\ \hline
+\texttt{q\_vehicles} & 2.0 & 4.8 \\ \hline
+\texttt{q\_activity} & 3.7 & 6.2 \\ \hline
+\texttt{q\_earnings} & 3.7 & 7.9 \\ \hline
+\texttt{q\_idle} & 5.9 & 12.8 \\ \hline}
+\newcommand{\mPnlRows}{750}
+\newcommand{\mReconDays}{3}
+\newcommand{\mReconEarn}{24 to 43\,\%}
+\newcommand{\mReconIdle}{10.9\,\%}
+\newcommand{\mReconTrips}{70 to 79\,\%}
+\newcommand{\mRegistry}{150}
+\newcommand{\mRestatementRows}{%
+before & & 0 \\ \hline
+A & new & 150 (all 150 rows recorded as corrected) \\ \hline
+B & same as A & \textbf{150} (no change) \\ \hline}
+\newcommand{\mRevenueRows}{%
+2026-03-01 & 47{,}664.77 & 47{,}664.77 & \textbf{0.00} \\ \hline
+2026-03-02 & 49{,}644.29 & 49{,}644.29 & \textbf{0.00} \\ \hline
+2026-03-03 & 49{,}969.45 & 49{,}969.45 & \textbf{0.00} \\ \hline
+2026-03-04 & 50{,}707.43 & 50{,}707.43 & \textbf{0.00} \\ \hline
+2026-03-05 & 50{,}456.36 & 50{,}456.36 & \textbf{0.00} \\ \hline}
+\newcommand{\mRunDate}{27 September 2026}
+\newcommand{\mStreamingRestarts}{no}
+\newcommand{\mTests}{461}
+\newcommand{\mThroughput}{239.9}

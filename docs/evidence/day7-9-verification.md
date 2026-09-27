@@ -1,5 +1,9 @@
 # Live verification — serving layer, observability, orchestration
 
+> Historical record of an earlier run. The report's numbers now come from the final
+> clean run in [`rerun-measurements.md`](rerun-measurements.md); the R-numbered figures and
+> TikZ diagrams named below were replaced.
+
 Captured from a running stack on a fresh `make clean && make up`, simulated clock
 anchored 2026-03-01, `SIM_DAY_SECONDS=300` (one simulated day per 5 real minutes,
 a 288x speed-up). Every number below was read from the live system, not computed
