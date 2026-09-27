@@ -137,7 +137,7 @@ batch-check: ## The numbers that prove the backfill did what it claims
 	  GROUP BY 1,2 ORDER BY 1,2;"
 	@echo "revenue vs zone earnings (two independent paths to one number - must match):"
 	@docker exec -e PGPASSWORD=fleet fleet-postgres-mart psql -U fleet -d fleet_mart -c "\
-	  SELECT p.sim_date, round(p.revenue,2) AS pnl_revenue, round(z.earnings,2) AS zone_earnings, \
+	  SELECT sim_date, round(p.revenue,2) AS pnl_revenue, round(z.earnings,2) AS zone_earnings, \
 	         round(p.revenue - z.earnings, 2) AS delta \
 	    FROM (SELECT sim_date, sum(revenue) revenue FROM mart.fact_vehicle_daily_pnl GROUP BY 1) p \
 	    FULL JOIN (SELECT sim_date, sum(earnings) earnings FROM mart.fact_zone_hourly GROUP BY 1) z \
