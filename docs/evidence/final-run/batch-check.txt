@@ -1,0 +1,28 @@
+pnl rows          : 750
+distinct sim_dates: 5
+restated rows     : 0
+zone-hourly rows  : 1428
+watermark         : 2026-03-05
+
+classification by sim_date:
+  sim_date  |  classification   | count 
+------------+-------------------+-------
+ 2026-03-01 | INSUFFICIENT_DATA |   150
+ 2026-03-02 | INSUFFICIENT_DATA |   150
+ 2026-03-03 | INSUFFICIENT_DATA |   150
+ 2026-03-04 | HEALTHY           |    92
+ 2026-03-04 | WATCH             |    58
+ 2026-03-05 | HEALTHY           |    90
+ 2026-03-05 | WATCH             |    60
+(7 rows)
+
+revenue vs zone earnings (two independent paths to one number - must match):
+  sim_date  | pnl_revenue | zone_earnings | delta 
+------------+-------------+---------------+-------
+ 2026-03-01 |    47664.77 |      47664.77 |  0.00
+ 2026-03-02 |    49644.29 |      49644.29 |  0.00
+ 2026-03-03 |    49969.45 |      49969.45 |  0.00
+ 2026-03-04 |    50707.43 |      50707.43 |  0.00
+ 2026-03-05 |    50456.36 |      50456.36 |  0.00
+(5 rows)
+

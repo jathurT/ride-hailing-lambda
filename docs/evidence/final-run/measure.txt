@@ -1,0 +1,51 @@
+time_utc 18:13:29
+ingest_events_per_s 239.91
+ingest_by_topic {'topic': 'fleet.telemetry.v1'} 239.91
+microbatch_p0.5 q_activity 3.67
+microbatch_p0.5 q_dlq 0.64
+microbatch_p0.5 q_earnings 3.72
+microbatch_p0.5 q_idle 5.93
+microbatch_p0.5 q_master 1.54
+microbatch_p0.5 q_vehicles 2.0
+microbatch_p0.95 q_activity 6.25
+microbatch_p0.95 q_dlq 3.21
+microbatch_p0.95 q_earnings 7.91
+microbatch_p0.95 q_idle 12.77
+microbatch_p0.95 q_master 3.42
+microbatch_p0.95 q_vehicles 4.85
+processed_rows_per_s q_dlq 288.2
+processed_rows_per_s q_master 1473.4
+processed_rows_per_s q_activity 626.0
+processed_rows_per_s q_earnings 615.3
+processed_rows_per_s q_vehicles 1106.4
+processed_rows_per_s q_idle 404.1
+api_prom_p0.5_ms 5.5
+api_prom_p0.95_ms 17.8
+api_prom_p0.99_ms 28.9
+fresh_n 30 nulls 0
+fresh_real_s p50 9.1 p95 23.2 max 25.2
+fresh_sim_min p50 43.4 p95 111.6
+api_client_ms /api/v1/fleet/live p50 8.6 p95 15.7 p99 18.2
+api_client_ms /api/v1/fleet/zones p50 10.0 p95 19.3 p99 22.2
+api_client_ms /api/v1/vehicles/unprofitable p50 10.8 p95 17.0 p99 19.6
+api_client_ms /api/v1/fleet/utilization?from=2026-03-02&to=2026-03-05 p50 14.6 p95 23.8 p99 27.4
+mem_mib fleet-telemetry-producer 43
+mem_mib fleet-expense-dropper 53
+mem_mib fleet-spark-app 3
+mem_mib fleet-streaming-job 1598
+mem_mib fleet-airflow-scheduler 645
+mem_mib fleet-airflow-webserver 772
+mem_mib fleet-kafka-ui 256
+mem_mib fleet-schema-registry 236
+mem_mib fleet-kafka-exporter 10
+mem_mib fleet-grafana 64
+mem_mib fleet-api 56
+mem_mib fleet-kafka 595
+mem_mib fleet-alertmanager 14
+mem_mib fleet-pushgateway 14
+mem_mib fleet-prometheus 51
+mem_mib fleet-postgres-mart 39
+mem_mib fleet-minio 365
+mem_mib fleet-airflow-postgres 56
+mem_mib fleet-redis 4
+mem_total_gib 4.76

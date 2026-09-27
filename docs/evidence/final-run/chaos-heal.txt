@@ -1,0 +1,11 @@
+restored at 18:28:48 - alerts should resolve within ~1 min
+host ports: 5432/tcp -> 0.0.0.0:5442
+
+t0 18:28:48
+NoTelemetryIngested firing 0.0
+ProducerTargetDown firing 0.0
+StreamingQueryStalled inactive 0.0
+NoTelemetryIngested inactive 19.1
+ProducerTargetDown inactive 19.1
+alertmanager active: [] inhibited: [] total: 0
+prometheus firing: []

@@ -1,0 +1,3 @@
+before : sum=0 rows=150 hwm=2026-03-05
+run A: rc=0 seconds=56 sum=150 rows=150 hwm=2026-03-05
+run B: rc=0 seconds=53 sum=150 rows=150 hwm=2026-03-05

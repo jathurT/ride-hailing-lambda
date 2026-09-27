@@ -1,0 +1,38 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/munsif/8_SEM/Big Data/big-data-project/ride-hailing-lambda
+configfile: pyproject.toml
+plugins: cov-7.1.0, anyio-4.14.2
+collected 461 items / 1 skipped
+
+tests/unit/test_api_contract.py ...........                              [  2%]
+tests/unit/test_config.py ........                                       [  4%]
+tests/unit/test_dag_purity.py ......                                     [  5%]
+tests/unit/test_dashboards.py .....................................      [ 13%]
+tests/unit/test_defects_and_fleet.py ...............                     [ 16%]
+tests/unit/test_demand_and_fares.py ..................                   [ 20%]
+tests/unit/test_expenses.py .................                            [ 24%]
+tests/unit/test_idle_detection.py .........................              [ 29%]
+tests/unit/test_logging_schema.py .................                      [ 33%]
+tests/unit/test_merge_boundary.py .......................                [ 38%]
+tests/unit/test_merge_degraded.py ......................                 [ 43%]
+tests/unit/test_profitability.py .......................                 [ 48%]
+tests/unit/test_redis_sink_logic.py .............                        [ 50%]
+tests/unit/test_report_artifacts.py ...................................  [ 58%]
+tests/unit/test_schemas.py ..................                            [ 62%]
+tests/unit/test_sim_clock_column.py ..............                       [ 65%]
+tests/unit/test_simclock.py ..........................                   [ 71%]
+tests/unit/test_storage.py ...............................               [ 77%]
+tests/unit/test_streaming_listener.py ...........                        [ 80%]
+tests/unit/test_transforms.py ................................           [ 87%]
+tests/unit/test_transforms_purity.py .................                   [ 90%]
+tests/unit/test_vehicle.py ..........................                    [ 96%]
+tests/unit/test_zones.py ................                                [100%]
+
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /home/munsif/8_SEM/Big Data/big-data-project/ride-hailing-lambda/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============ 461 passed, 1 skipped, 1 warning in 140.37s (0:02:20) =============

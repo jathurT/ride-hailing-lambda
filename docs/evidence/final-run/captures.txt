@@ -1,0 +1,22 @@
+  ok      grafana-fleet-operations     grafana-fleet-operations.png (469 KB)
+  ok      grafana-batch-reconciliation grafana-batch-reconciliation.png (501 KB)
+  ok      grafana-pipeline-health      grafana-pipeline-health.png (797 KB)
+  ok      prometheus-targets           prometheus-targets.png (392 KB)
+  ok      api-docs                     api-docs.png (236 KB)
+  ok      kafka-topics                 kafka-topics.png (147 KB)
+  ok      kafka-telemetry-messages     kafka-telemetry-messages.png (370 KB)
+  ok      kafka-dlq-messages           kafka-dlq-messages.png (436 KB)
+  ok      kafka-schemas                kafka-schemas.png (135 KB)
+  ok      spark-streaming              spark-streaming.png (349 KB)
+  ok      airflow-dags                 airflow-dags.png (181 KB)
+  ok      airflow-grid                 airflow-grid.png (350 KB)
+  ok      airflow-graph                airflow-graph.png (321 KB)
+  ok      minio-lake                   minio-lake.png (533 KB)
+  ok      terminal-postgres-pnl        terminal-postgres-pnl.png
+  ok      terminal-redis-speed-view    terminal-redis-speed-view.png
+  ok      terminal-api-merged          terminal-api-merged.png
+  ok      terminal-batch-check         terminal-batch-check.png
+  ok      terminal-api-degraded        terminal-api-degraded.png
+  ok      grafana-pipeline-outage      grafana-pipeline-outage.png (904 KB)
+  ok      alertmanager                 alertmanager.png (124 KB)
+  ok      prometheus-alerts            prometheus-alerts.png (154 KB)

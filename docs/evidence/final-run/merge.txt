@@ -1,0 +1,6 @@
+as_of 2026-03-05T08:03:52.074144Z hwm 2026-03-04 range 2026-03-02 2026-03-05 http 200
+rows 48 {'batch': 36, 'speed': 12} uncovered [] degraded False
+dates->sources {'2026-03-02': ['batch'], '2026-03-03': ['batch'], '2026-03-04': ['batch'], '2026-03-05': ['speed']}
+one side per date: True
+consistency: batch-complete-through 2026-03-04
+FROM=2026-03-02 TO=2026-03-05

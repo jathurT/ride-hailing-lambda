@@ -1,0 +1,6 @@
+events_produced_total{status="ok",topic="fleet.telemetry.v1"} 467489.0
+defects_injected_total{defect_type="negative_fare"} 974.0
+defects_injected_total{defect_type="null_coordinates"} 1415.0
+defects_injected_total{defect_type="implausible_speed"} 907.0
+defects_injected_total{defect_type="coordinates_out_of_bounds"} 922.0
+defects_injected_total{defect_type="future_timestamp"} 474.0

@@ -1,0 +1,5 @@
+('COORDINATES_OUT_OF_BOUNDS', 'injected-like') 922 | event_id= V080-1772329784112 status= idle lat= 23.243859512162164 speed= 0.0 fare=
+('FUTURE_TIMESTAMP', 'n/a') 475 | event_id= V135-1772332744985 status= on_trip lat= 6.954957 speed= 30.1 fare= 10.82
+('IMPLAUSIBLE_SPEED', 'injected-like') 907 | event_id= V038-1772328658363 status= idle lat= 6.9669 speed= 317.9137331279176 fare=
+('NEGATIVE_FARE', 'injected-like') 975 | event_id= V021-1772328797301 status= idle lat= 6.873109 speed= 0.0 fare= -93.53253552133143
+('NULL_COORDINATES', 'n/a') 1415 | event_id= V150-1772328985274 status= idle lat= speed= 0.0 fare=

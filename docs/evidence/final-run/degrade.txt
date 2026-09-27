@@ -1,0 +1,8 @@
+{"situation": "both stores up", "http": 200, "x-data-degraded": null, "rows": 48, "by_source": {"batch": 36, "speed": 12}, "degraded": false, "missing_stores": [], "hwm": "2026-03-05", "consistency": "batch-complete-through 2026-03-05", "detail": null}
+{"situation": "redis stopped", "http": 200, "x-data-degraded": "true", "rows": 36, "by_source": {"batch": 36}, "degraded": true, "missing_stores": ["redis"], "hwm": "2026-03-05", "consistency": "batch-complete-through 2026-03-05; DEGRADED - unreachable: redis", "detail": null}
+  ok      terminal-api-degraded        terminal-api-degraded.png
+
+1/1 captured into /home/munsif/8_SEM/Big Data/big-data-project/ride-hailing-lambda/docs/report/figures
+{"situation": "both stopped", "http": 503, "x-data-degraded": null, "rows": 0, "by_source": {}, "degraded": null, "missing_stores": null, "hwm": null, "consistency": null, "detail": "no serving store reachable (postgres, redis); the pipeline may still be healthy - this is the serving layer failing"}
+{"situation": "postgres stopped", "http": 200, "x-data-degraded": "true", "rows": 12, "by_source": {"speed": 12}, "degraded": true, "missing_stores": ["postgres"], "hwm": null, "consistency": "no batch data available; all values approximate; 3 date(s) in neither view (2026-03-03..2026-03-05) - the batch layer is behind the simulated clock; DEGRADED - unreachable: postgres; watermark unknown while postgres is unreachable", "detail": null}
+{"situation": "restarted", "http": 200, "x-data-degraded": null, "rows": 48, "by_source": {"batch": 36, "speed": 12}, "degraded": false, "missing_stores": [], "hwm": "2026-03-05", "consistency": "batch-complete-through 2026-03-05", "detail": null}
