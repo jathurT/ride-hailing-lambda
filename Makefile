@@ -220,7 +220,7 @@ report-check: ## Build the report and refuse unfilled cover-page placeholders
 	@$(MAKE) --no-print-directory -C docs/report check
 
 .PHONY: diagrams
-diagrams: ## Rebuild the report's TikZ diagrams (needs pdflatex)
+diagrams: ## Export the draw.io diagrams (D1-D6) to PDF
 	@$(MAKE) --no-print-directory -C docs/diagrams all
 
 .PHONY: figures

@@ -1,32 +1,24 @@
-# Rebuild every report diagram from source.
-#
-# TikZ rather than draw.io: the report is LaTeX, so these compile to vector art with
-# no external asset pipeline, fonts match the body text exactly, and the source sits
-# in version control beside the code it describes. A diagram that can be regenerated
-# cannot silently drift from the system.
-#
-#   make          build all PDFs
-#   make preview  also render PNGs for eyeballing
-#   make clean    remove build artefacts (keeps the PDFs)
+# Export the draw.io diagrams to vector PDF and copy them to the report's figures.
+#   make            regenerate *.drawio from build_drawio.py, then export
+# The .drawio files can also be opened and edited in draw.io directly.
 
-TEX  := $(wildcard D*.tex)
-PDF  := $(TEX:.tex=.pdf)
-PNG  := $(TEX:.tex=-preview-1.png)
+FIGURES_DIR := ../report/figures
+DIAGRAMS := D1-context D2-layered-architecture D3-event-sequence D4-merge-boundary \
+            D5-storage D6-daily-batch
+PDFS := $(patsubst %,%.pdf,$(DIAGRAMS))
 
-.PHONY: all preview clean distclean
-all: $(PDF)
+.PHONY: all sources clean
 
-%.pdf: %.tex fleetstyle.tex
-	pdflatex -interaction=nonstopmode -halt-on-error $< >/dev/null
-	@echo "  built $@"
+all: sources $(PDFS)
+	@mkdir -p $(FIGURES_DIR)
+	@cp $(PDFS) $(FIGURES_DIR)/
+	@echo "copied $(words $(PDFS)) diagrams to $(FIGURES_DIR)"
 
-preview: $(PDF)
-	@for f in $(PDF); do pdftoppm -png -r 130 $$f $${f%.pdf}-preview; done
-	@echo "  previews rendered"
+sources:
+	../../.venv/bin/python build_drawio.py
+
+%.pdf: %.drawio
+	drawio -x -f pdf --crop -o $@ $< --no-sandbox >/dev/null 2>&1
 
 clean:
-	@rm -f *.aux *.log *.out *.synctex.gz *-preview-*.png
-	@echo "  cleaned (PDFs kept)"
-
-distclean: clean
-	@rm -f $(PDF)
+	@rm -f *.pdf
