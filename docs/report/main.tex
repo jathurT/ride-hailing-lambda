@@ -1,4 +1,4 @@
-% EC8203 Applied Big Data Engineering, mini project report.
+% EC8202 Big Data Analytics, mini project report.
 % Ride-hailing fleet operations on a Lambda architecture.
 %
 % Build: latexmk -pdf main.tex   (or make report from the repository root)
@@ -22,15 +22,15 @@
 \usepackage{microtype}
 \usepackage[most]{tcolorbox}
 \usepackage{fancyhdr}
-\usepackage[hidelinks,colorlinks=true,linkcolor=accent,citecolor=accent,
-            urlcolor=accent]{hyperref}
+\usepackage[hidelinks,colorlinks=true,linkcolor=black,citecolor=black,
+            urlcolor=black]{hyperref}
 
-% One accent colour carries the whole design.
-\definecolor{accent}{HTML}{0F766E}     % teal
-\definecolor{accentlight}{HTML}{E6F2F1}
-\definecolor{tablehead}{HTML}{0F766E}  % table header row
-\definecolor{zebra}{HTML}{F3F7F7}      % alternate table rows
-\definecolor{gridline}{HTML}{B8C4C3}   % table borders
+% Black, white and greys only.
+\definecolor{accent}{HTML}{333333}     % headings, rules, call-out bar
+\definecolor{accentlight}{HTML}{F2F2F2}
+\definecolor{tablehead}{HTML}{3A3A3A}  % table header row
+\definecolor{zebra}{HTML}{F4F4F4}      % alternate table rows
+\definecolor{gridline}{HTML}{BDBDBD}   % table borders
 
 \setstretch{1.0}
 \setlist{nosep,leftmargin=1.4em}
@@ -48,15 +48,11 @@
 % A header cell: white bold on the teal header row.
 \newcommand{\hd}[1]{\textcolor{white}{\textbf{#1}}}
 
-% Running header and page number.
+% Page number bottom right, no running header.
 \pagestyle{fancy}
 \fancyhf{}
-\fancyhead[L]{\small\textcolor{accent}{Ride-Hailing Fleet Operations}}
-\fancyhead[R]{\small\textcolor{gray}{EC8203 Applied Big Data Engineering}}
 \fancyfoot[R]{\small\thepage}
-\renewcommand{\headrulewidth}{0.4pt}
-\renewcommand{\headrule}{{\color{gridline}\hrule width\headwidth height\headrulewidth}}
-\setlength{\headheight}{14pt}
+\renewcommand{\headrulewidth}{0pt}
 \fancypagestyle{plain}{\fancyhf{}\fancyfoot[R]{\small\thepage}\renewcommand{\headrulewidth}{0pt}}
 \setlength{\parskip}{3pt}
 
@@ -88,7 +84,7 @@
     {\Large \textbf{Faculty of Engineering, University of Ruhuna}}\par
     \vfill
     {\Large \textbf{Mini Project Report}}\\[0.3cm]
-    {\large \textbf{EC8203 Applied Big Data Engineering}}\par
+    {\large \textbf{EC8202 Big Data Analytics}}\par
     \vfill
     {\huge\textbf{Ride-Hailing Fleet Operations}}\\[0.5cm]
     {\large\itshape A Lambda architecture for live fleet status and daily profitability}\par
@@ -827,7 +823,7 @@ correct than any number of green dashboard panels.
 % =====================================================================
 \begin{thebibliography}{9}
 \addcontentsline{toc}{section}{References}
-\bibitem{module} EC8203 Applied Big Data Engineering, lecture notes on Lambda and Kappa
+\bibitem{module} EC8202 Big Data Analytics, lecture notes on Lambda and Kappa
 architectures, streams and queues, and data governance.
 \bibitem{kafka} Apache Kafka documentation: design, partitions and ordering, KRaft mode.
 \bibitem{spark} Apache Spark, \emph{Structured Streaming Programming Guide}: event-time
