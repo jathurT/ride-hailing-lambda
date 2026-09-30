@@ -834,11 +834,13 @@ windows, watermarks and \texttt{foreachBatch}.
 \end{thebibliography}
 
 % =====================================================================
+% Start the appendices on a fresh page and keep their tables under the headings.
+\clearpage
 \appendix
 \section{Individual contributions}
 % =====================================================================
 
-\begin{table}[htbp]\centering\small
+\begin{table}[H]\centering\small
 \begin{tabularx}{\linewidth}{|l|X|}
 \hline
 \rowcolor{tablehead}\hd{Member} & \hd{Major parts} \\ \hline
@@ -858,7 +860,7 @@ All three members took part in testing, the demonstration and reviewing this rep
 
 \section{Reproducing the results}
 
-\begin{table}[htbp]\centering\small
+\begin{table}[H]\centering\small
 \begin{tabularx}{\linewidth}{|l|X|}
 \hline
 \rowcolor{tablehead}\hd{Command} & \hd{What it does} \\ \hline
@@ -874,6 +876,8 @@ All three members took part in testing, the demonstration and reviewing this rep
 \end{tabularx}
 \end{table}
 
+% Give the screenshot heading room to stay with the first figure.
+\clearpage
 \section{More screenshots}
 
 \shot{kafka-telemetry-messages}{0.9}{Kafka UI: telemetry decoded from Avro through the
