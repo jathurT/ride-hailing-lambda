@@ -52,9 +52,15 @@ entry points, enforced by an architecture test.
 
 ## Quick start
 
-**Prerequisite:** Docker Desktop with WSL integration enabled.
+**Prerequisites:** Docker with the Compose plugin, Bash, and GNU Make. On Windows, enable
+Docker Desktop's WSL integration and run the commands in a WSL terminal. The terminal helpers
+below also need `curl` and `jq` on the host.
+
+Run commands from the repository root (the directory containing `Makefile` and
+`docker-compose.yml`):
 
 ```bash
+cd /path/to/ride-hailing-lambda   # replace with your checkout location
 make setup                 # check docker, create .env
 make clean && make up      # fresh simulation + full pipeline
 make up-obs                # add Prometheus, Grafana, Alertmanager
@@ -107,8 +113,150 @@ Durations are marked *real* or *simulated* throughout. A 30-simulated-minute wat
 6.25 real seconds; a 2-simulated-hour TTL is 25 real seconds.
 
 ```bash
-make simclock              # where the simulated clock is now
+make simclock              # show the shared clock anchor and simulation rate
 ```
+
+The `today` helper below returns the current simulated date from the running API.
+
+---
+
+## Terminal commands
+
+### Service names and `SVC`
+
+`SVC` is short for **service**. In `make logs SVC=streaming-job`, it is a Makefile variable
+that selects the Compose service whose logs you want. Set it on the command itself; there is
+no separate definition or export required.
+
+```bash
+docker compose --profile '*' config --services   # available service names
+make ps                                         # running services, health and ports
+make logs SVC=streaming-job                      # follow Spark streaming logs
+make logs SVC=airflow-scheduler                  # follow scheduler logs
+make restart-svc SVC=telemetry-producer          # rebuild/recreate one service, preserving data
+```
+
+Use the Compose service name, such as `streaming-job`, for `SVC`. Commands such as
+`docker exec` use the container name instead, such as `fleet-streaming-job`. Press `Ctrl+C`
+to stop following logs; the service keeps running. `make restart-svc` uses `--no-deps` so it
+does not rerun the initialization container over an existing simulation.
+
+### Define the optional shortcuts
+
+`svc` (lowercase) is a Bash function meaning **services**. It is separate from the uppercase
+`SVC` Makefile variable. The following functions are shortcuts, so Bash will report
+`command not found` until you define them. Paste the whole block into your Bash terminal
+after starting the stack. Definitions last for that terminal session; paste them again in a
+new terminal, or add them to `~/.bashrc` and run `source ~/.bashrc` to keep them available.
+
+```bash
+svc() {
+  docker compose --profile '*' ps -a --format 'table {{.Service}}\t{{.Status}}'
+}
+
+lake() {
+  docker exec fleet-minio sh -c '
+    mc_bin=$(command -v mc || true)
+    if [ -z "$mc_bin" ]; then
+      mc_bin=/opt/bitnami/minio-client/bin/mc
+    fi
+    "$mc_bin" alias set l http://localhost:9000 \
+      "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null || exit
+    "$mc_bin" "$@"
+  ' sh "$@"
+}
+
+today() (
+  set -o pipefail
+  curl -fsS http://localhost:8000/api/v1/pipeline/status |
+    jq -er '.as_of_sim | split("T")[0]'
+)
+
+status() (
+  set -o pipefail
+  curl -fsS http://localhost:8000/api/v1/pipeline/status |
+    jq '{as_of_sim, sim_day_index, batch_complete_thru,
+         watermark_age_sim_days, pnl_rows, restated_rows, degraded, missing_stores}'
+)
+
+util() (
+  set -o pipefail
+  local sim_end response_dir
+  sim_end=$(today) || return
+  response_dir=$(mktemp -d) || return
+  trap 'rm -rf "$response_dir"' EXIT
+  curl -sS -D "$response_dir/headers" -o "$response_dir/body" \
+    "http://localhost:8000/api/v1/fleet/utilization?from=${1:-2026-03-02}&to=$sim_end" || return
+  grep -iE '^HTTP|^x-data-degraded:' "$response_dir/headers"
+  jq '{consistency, batch_complete_thru, degraded, missing_stores,
+       rows_by_source: ([.rows[]?.source] | group_by(.) |
+         map({(.[0]): length}) | add // {}), detail}' "$response_dir/body"
+)
+
+pnl() (
+  set -o pipefail
+  curl -fsS "http://localhost:8000/api/v1/vehicles/${1:-V113}/profitability?days=${3:-30}" |
+    jq --arg d "${2:-2026-03-03}" \
+      '.rows[] | select(.sim_date == $d) |
+       {sim_date, fuel_cost, net_profit, restatement_count, restated_at}'
+)
+```
+
+`lake` runs the MinIO client inside the container, using its configured credentials. It
+creates a client alias named `l` for the local object store, so `l/fleet-lake` means the
+`fleet-lake` bucket on that store. It supports the client paths used by both the base MinIO
+image and the Bitnami image in `docker-compose.override.yml`; no host MinIO client is needed.
+The API helpers require the serving API on port 8000. `today` reads the simulated clock,
+not your computer's date, and still works if Redis is unavailable but the API is running.
+
+### Use the shortcuts
+
+Run `svc` from the repository root so Compose finds the project's configuration.
+
+| Command | What it shows |
+|---|---|
+| `svc` | All created services, including stopped containers and completed initialization jobs |
+| `status` | Simulated time, batch completion date, watermark age, row counts and unavailable stores |
+| `today` | Current simulated date in `YYYY-MM-DD` format |
+| `util` | HTTP status, degraded header and counts of batch/live rows from March 2 through today |
+| `util 2026-03-04` | The same summary with a different starting simulated date |
+| `pnl V113 2026-03-03` | Fuel cost, net profit and restatement details for that vehicle and date |
+| `pnl V113 2026-03-03 60` | Search the last 60 simulated days for that vehicle/date instead of the default 30 |
+| `lake ls l/fleet-lake/` | Top-level objects and prefixes in the lake |
+| `lake ls l/fleet-lake/landing/expenses/` | Daily partner expense files |
+| `lake cat l/fleet-lake/landing/expenses/expenses_2026-03-03.csv` | Contents of one daily expense file |
+
+The example dates assume the default simulation start of March 1, 2026. Wait until the date
+you request exists: each simulated day takes five real minutes. Profitability also needs the
+batch layer to have processed that date. `pnl` prints nothing if the date is outside the
+requested window or has no matching row; `status` shows how far the batch has completed.
+
+### Check processing and apply a corrected expense file
+
+```bash
+make dag-check             # DAG availability, import errors and recent runs
+make batch-check           # row counts, restatements and revenue reconciliation
+make obs-check             # monitoring targets and dashboard provisioning
+make alerts                # alert rules and their current state
+```
+
+Once a corrected expense file is present in the lake for an already processed date, trigger
+that date again through Airflow. The trigger starts an asynchronous run; wait for it to
+succeed in Airflow before comparing the result:
+
+```bash
+pnl V113 2026-03-03
+lake cat l/fleet-lake/landing/expenses/expenses_2026-03-03.csv
+make dag-trigger DATE=2026-03-03
+make dag-check
+# After the run succeeds:
+pnl V113 2026-03-03
+make batch-check
+```
+
+`restatement_count` and `restated_at` identify recomputed profitability rows. The batch
+completion watermark should not move backward when an older date is corrected. For missing
+completed days, use `make backfill DAYS=3` (adjust the number of days needed).
 
 ---
 
