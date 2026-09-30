@@ -220,10 +220,10 @@ Stated here rather than left to be discovered; the report discusses each in full
 
 ## Individual contributions
 
-| Member | Contribution |
-|---|---|
-| Jathur | Architecture decision and justification; simulated clock and typed configuration; stateful idle detection; serving layer and the merge boundary |
-| Rifath | Simulated sources and ingestion; Avro and Schema Registry; speed-layer queries and sinks; observability — metrics, alert rules and dashboards |
-| Shamil | Storage design — lake layout, star schema, speed-view keys; batch layer — zone rollup and per-vehicle profitability; restatement and idempotency |
+| Index number | Member | Contribution |
+|---|---|---|
+| EG/2021/4568 | JATHURSHAN T. | Architecture decision and justification; simulated clock and typed configuration; stateful idle detection; serving layer and the merge boundary |
+| EG/2021/4810 | SHAMIL M.K.M. | Storage design — lake layout, star schema, speed-view keys; batch layer — zone rollup and per-vehicle profitability; restatement and idempotency |
+| EG/2021/4760 | RIFATH M.F.M. | Simulated sources and ingestion; Avro and Schema Registry; speed-layer queries and sinks; observability — metrics, alert rules and dashboards |
 
 All three contributed to testing, the demonstration, and the report.
