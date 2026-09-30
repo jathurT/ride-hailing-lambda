@@ -1,0 +1,15 @@
+services:
+  streaming-job:
+    mem_limit: 3g
+
+  airflow-scheduler:
+    environment:
+      DOCKER_API_VERSION: "1.44"
+
+  minio:
+    image: bitnamilegacy/minio:2024.6.13
+    command: ["/opt/bitnami/scripts/minio/run.sh"]
+    volumes: !override
+      - minio-data:/bitnami/minio/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/bitnami/minio-client/bin/mc ready local || exit 1"]
