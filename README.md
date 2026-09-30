@@ -25,7 +25,6 @@ file, processes both, and answers one business question from two directions at o
   - [Repository layout](#repository-layout)
   - [Development](#development)
   - [Documentation](#documentation)
-- [Known limitations](#known-limitations)
 - [Individual contributions](#individual-contributions)
 
 ---
@@ -365,27 +364,6 @@ turn a misconfiguration into a start-up failure rather than a wrong number later
 `make figures` re-captures the report's screenshots from the running stack. Both the diagrams
 and the screenshots are regenerated from source, so the report cannot silently drift from the
 system it describes.
-
----
-
-## Known limitations
-
-Stated here rather than left to be discovered; the report discusses each in full.
-
-- **Distributed tracing was not implemented.** Observability rests on structured logging,
-  metrics and alerting. A request cannot currently be followed across process boundaries.
-- **A rendered PDF daily report was not implemented.** The provisioned dashboards discharge the
-  requirement for a consolidated report *or* dashboard.
-- **Exactly-once is not achieved.** The system is at-least-once with idempotent sinks, which is
-  why every sink overwrites rather than increments.
-- **Consumer lag cannot measure the streaming queries.** They checkpoint their own offsets and
-  never commit to a consumer group, so lag reads zero whether a query is healthy or dead. The
-  liveness signal is the age of the last progress timestamp instead.
-- **Three of six streaming queries exceed their 10-second trigger at p95** on this hardware:
-  the windowed and stateful ones. The system keeps up on average, not at the tail.
-- **The expense file is generated from our own simulated distance**, so the two sources are only
-  pseudo-independent and the reconciliation is weaker than it appears.
-- **Single broker, `replication.factor=1`, no auth or TLS anywhere.** Demo scale only.
 
 ---
 
